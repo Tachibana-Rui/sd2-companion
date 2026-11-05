@@ -1,0 +1,155 @@
+{
+  "schema": 1,
+  "source": "official_local_SteelDivision2.exe",
+  "client_sha256": "2986600db813a24a92f59698ac1b250d4ae7a96b84f2000bc1ad5a53bbfd1cf6",
+  "actions": {
+    "2": {
+      "class_name": "TNetworkActionSurrender",
+      "name_zh": "投降请求",
+      "namespace": "Eugen::IA",
+      "execute_va": "0x140908150",
+      "serialize_va": "0x14090d100",
+      "evidence": "official_client_rtti_vtable_and_serialized_type_byte"
+    },
+    "3": {
+      "class_name": "TNetworkActionCommitOptionPlayer",
+      "name_zh": "提交玩家选项",
+      "namespace": "Eugen::IA",
+      "execute_va": "0x140906a60",
+      "serialize_va": "0x14090c250",
+      "evidence": "official_client_rtti_vtable_and_serialized_type_byte"
+    },
+    "5": {
+      "class_name": "TNetworkActionGiveOrderStandard",
+      "name_zh": "标准单位命令",
+      "namespace": "Eugen::IA",
+      "execute_va": "0x140907020",
+      "serialize_va": "0x14090c690",
+      "evidence": "official_client_rtti_vtable_and_serialized_type_byte"
+    },
+    "6": {
+      "class_name": "TNetworkActionPlayerMission",
+      "name_zh": "玩家任务",
+      "namespace": "Eugen::IA",
+      "execute_va": "0x1409076e0",
+      "serialize_va": "0x14090c980",
+      "evidence": "official_client_rtti_vtable_and_serialized_type_byte"
+    },
+    "8": {
+      "class_name": "TNetworkActionChangeOrderConfig",
+      "name_zh": "修改命令设置",
+      "namespace": "Eugen::IA",
+      "execute_va": "0x140906340",
+      "serialize_va": "0x14090bd70",
+      "evidence": "official_client_rtti_vtable_and_serialized_type_byte"
+    },
+    "11": {
+      "class_name": "TNetworkActionLaunchFumigene",
+      "name_zh": "发射烟幕",
+      "namespace": "Eugen::IA",
+      "execute_va": "0x1409074b0",
+      "serialize_va": "0x14090c870",
+      "evidence": "official_client_rtti_vtable_and_serialized_type_byte"
+    },
+    "12": {
+      "class_name": "TNetworkActionCancelFumigene",
+      "name_zh": "取消烟幕",
+      "namespace": "Eugen::IA",
+      "execute_va": "0x140906130",
+      "serialize_va": "0x14090bbf0",
+      "evidence": "official_client_rtti_vtable_and_serialized_type_byte"
+    },
+    "13": {
+      "class_name": "TNetworkActionAnnuleProduction",
+      "name_zh": "取消生产请求",
+      "namespace": "Eugen::IA",
+      "execute_va": "0x140906050",
+      "serialize_va": "0x14090bb10",
+      "evidence": "official_client_rtti_vtable_and_serialized_type_byte"
+    },
+    "14": {
+      "class_name": "TNetworkActionChangeProduction",
+      "name_zh": "修改生产请求",
+      "namespace": "Eugen::IA",
+      "execute_va": "0x1409065f0",
+      "serialize_va": "0x14090bf40",
+      "evidence": "official_client_rtti_vtable_and_serialized_type_byte"
+    },
+    "15": {
+      "class_name": "TNetworkActionProductionUnite",
+      "name_zh": "生产请求",
+      "namespace": "Eugen::IA",
+      "execute_va": "0x140907810",
+      "serialize_va": "0x14090ca80",
+      "evidence": "official_client_rtti_vtable_and_serialized_type_byte"
+    },
+    "17": {
+      "class_name": "TNetworkActionItemFinished",
+      "name_zh": "条目完成通知",
+      "namespace": "Eugen::IA",
+      "execute_va": "0x140907260",
+      "serialize_va": "0x14090c790",
+      "evidence": "official_client_rtti_vtable_and_serialized_type_byte",
+      "note": "样本中每位玩家早期一次，早于全部生产请求；不是逐单位生产完成记录。"
+    },
+    "18": {
+      "class_name": "TNetworkActionKill",
+      "name_zh": "显式击杀指令",
+      "namespace": "Eugen::IA",
+      "execute_va": "0x140907320",
+      "serialize_va": "0x14090c810",
+      "evidence": "official_client_rtti_vtable_and_serialized_type_byte",
+      "note": "类别名和序列化已确认；不能据此把它当作自然战斗击杀或常规生产部署事件。"
+    },
+    "20": {
+      "class_name": "TNetworkActionSpawnUnit",
+      "name_zh": "显式创建单位指令",
+      "namespace": "Eugen::IA",
+      "execute_va": "0x140907da0",
+      "serialize_va": "0x14090cf10",
+      "evidence": "official_client_rtti_vtable_and_serialized_type_byte",
+      "note": "类别名和序列化已确认；不能据此把它当作自然战斗击杀或常规生产部署事件。"
+    },
+    "21": {
+      "class_name": "TNetworkActionSpawnUnitWithTransport",
+      "name_zh": "显式创建单位与运输指令",
+      "namespace": "Eugen::IA",
+      "execute_va": "0x140907eb0",
+      "serialize_va": "0x14090cfa0",
+      "evidence": "official_client_rtti_vtable_and_serialized_type_byte",
+      "note": "类别名和序列化已确认；不能据此把它当作自然战斗击杀或常规生产部署事件。"
+    },
+    "22": {
+      "class_name": "TNetworkActionPlayerSynchroServiceAction",
+      "name_zh": "玩家同步服务动作",
+      "namespace": "Eugen::IA",
+      "execute_va": "0x1409077d0",
+      "serialize_va": "0x14090c9f0",
+      "evidence": "official_client_rtti_vtable_and_serialized_type_byte"
+    },
+    "39": {
+      "class_name": "TNetworkActionDeactivateWeapon",
+      "name_zh": "武器停用设置",
+      "namespace": "Eugen::IA",
+      "execute_va": "0x140906be0",
+      "serialize_va": "0x14090c3b0",
+      "evidence": "official_client_rtti_vtable_and_serialized_type_byte"
+    },
+    "41": {
+      "class_name": "TNetworkActionSetOutmapShootMode",
+      "name_zh": "场外射击模式设置",
+      "namespace": "Eugen::IA",
+      "execute_va": "0x140907be0",
+      "serialize_va": "0x14090cdf0",
+      "evidence": "official_client_rtti_vtable_and_serialized_type_byte"
+    },
+    "42": {
+      "class_name": "TNetworkActionToggle",
+      "name_zh": "切换状态请求",
+      "namespace": "Eugen::IA",
+      "execute_va": "0x140908200",
+      "serialize_va": "0x14090d180",
+      "evidence": "official_client_rtti_vtable_and_serialized_type_byte"
+    }
+  }
+}

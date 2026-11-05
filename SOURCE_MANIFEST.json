@@ -1,0 +1,511 @@
+{
+  "schema": 1,
+  "scope": "sd2-companion-public-source",
+  "files": [
+    {
+      "path": ".gitattributes",
+      "bytes": 154,
+      "sha256": "e54974a59ebf5bd02c3ba55979a5d417fbf8475aa15e9f66bb77f169d95f738a"
+    },
+    {
+      "path": ".gitignore",
+      "bytes": 186,
+      "sha256": "cbc0ac8ff924a53cfb6804c573373b545aa14bd75f4966bcc95f352b414bddcf"
+    },
+    {
+      "path": "README.md",
+      "bytes": 6488,
+      "sha256": "e864248d9f993e5f9de53017f6316137b9be6202ba96e88252ccdaa565c5f88b"
+    },
+    {
+      "path": "THIRD_PARTY_NOTICES.md",
+      "bytes": 1741,
+      "sha256": "73f2136fc050b9f7b72bbef55a708a85383bc9c7827ac8c17b5ec05123bb2d0e"
+    },
+    {
+      "path": "deck-analyzer/analyzer.py",
+      "bytes": 14337,
+      "sha256": "83b4ffa93fb980fc654a857ced0b3c93b107cae3c7bf26c790e34eb2b2291cda"
+    },
+    {
+      "path": "deck-analyzer/data/catalog.json",
+      "bytes": 1662336,
+      "sha256": "ad33280129066f6dfd46a342f2991e790cbfa5594aae06f2686c1a3b0298b820"
+    },
+    {
+      "path": "map-selector/maps.json",
+      "bytes": 16543,
+      "sha256": "7c14512a11c0807dd5af244b52f60e8875e8ee47a782eb9ccb154c8c5c768c1b"
+    },
+    {
+      "path": "player-stats/build_companion.py",
+      "bytes": 6317,
+      "sha256": "e2795af5912f9141efe6c3ac83ba4b8cdd32747a5f2b9d0f538d1f23a4a50f6f"
+    },
+    {
+      "path": "player-stats/companion.example.json",
+      "bytes": 535,
+      "sha256": "d572183edc957b62e867ec1eccfa73adfb9300ec618bad5ea0d59ab72a4c5fd8"
+    },
+    {
+      "path": "player-stats/companion/__init__.py",
+      "bytes": 1163,
+      "sha256": "7588916579563eb2cf8abc2a1862924e85739a176d839d07b5c9fdc37d996256"
+    },
+    {
+      "path": "player-stats/companion/aggregation.py",
+      "bytes": 48613,
+      "sha256": "a9f23fb73310f393e6142d705cce3f21abfad3839f8b3e248d6bcf1267197388"
+    },
+    {
+      "path": "player-stats/companion/bootstrap.py",
+      "bytes": 7318,
+      "sha256": "86878937b344a1b4acade3e53310cff789ef34aa48455864df84f41868575d3a"
+    },
+    {
+      "path": "player-stats/companion/catalog.py",
+      "bytes": 13877,
+      "sha256": "59f1a26a963bda0e7f2b90a225699c674f5b33ea46208c68dceb23dd1969855b"
+    },
+    {
+      "path": "player-stats/companion/cli.py",
+      "bytes": 20005,
+      "sha256": "2006c7f59faf0ad3e38bb617feb72a5e949cd7e822430f7c1abca9d26a221bfc"
+    },
+    {
+      "path": "player-stats/companion/config.py",
+      "bytes": 12270,
+      "sha256": "d505950b3d5657e20c2931760f25bb132c674e7216075e5421ad9569f522d643"
+    },
+    {
+      "path": "player-stats/companion/credentials.py",
+      "bytes": 5744,
+      "sha256": "3dfec625c70744a529d7aff0e1057e4df69e814d8c737d7ffb6dbfa0ccb232ef"
+    },
+    {
+      "path": "player-stats/companion/desktop.py",
+      "bytes": 92937,
+      "sha256": "be6b62d4a814cac3cb6dd9d814148066f807bca9220caab4068d2c1613c2bbc0"
+    },
+    {
+      "path": "player-stats/companion/enrollment.py",
+      "bytes": 6393,
+      "sha256": "4afb9f8311743b8ca61f4db09c0b2b3483eae7e710312f2ee0b5620a2e027bde"
+    },
+    {
+      "path": "player-stats/companion/file_access.py",
+      "bytes": 22456,
+      "sha256": "945b6124b278f4f8d13f21d6ab7db04510bd4d1cbe01fa7b40963b862593f1e9"
+    },
+    {
+      "path": "player-stats/companion/getters.py",
+      "bytes": 3733,
+      "sha256": "92180ab5363fb082f54431db64be5ce3da43dbaed745b5eddcc0247932df0c3a"
+    },
+    {
+      "path": "player-stats/companion/install-update.ps1",
+      "bytes": 3014,
+      "sha256": "4a622c44b70b126ea53edc6653cad8ecd65d877024aa3e5893dff2118eadf5a1"
+    },
+    {
+      "path": "player-stats/companion/live_capture.py",
+      "bytes": 12240,
+      "sha256": "2dd69e4cf20633f0ace942e7e62bf47cdb984b793ccbfc913cd8298feb78366a"
+    },
+    {
+      "path": "player-stats/companion/live_runtime.py",
+      "bytes": 3836,
+      "sha256": "1bd5d81a62d0d2fa97220e029b117526abe6e6d1081108769852a551760e1ef3"
+    },
+    {
+      "path": "player-stats/companion/local_replay_library.py",
+      "bytes": 8556,
+      "sha256": "817c9ecb20db9a43903ca36d46a82c3f68e1f4a24f7cea1c7abe08039d23ff0b"
+    },
+    {
+      "path": "player-stats/companion/maps.py",
+      "bytes": 2180,
+      "sha256": "49d93dc0924c3d63853b8bc1ff84efe559b5cf1bd39259df9e2d0d19410b3632"
+    },
+    {
+      "path": "player-stats/companion/native_report.py",
+      "bytes": 35094,
+      "sha256": "35e50f96a53e663ae11768206e6c7225c5ecaebd1ecb2365031ea24169ba178f"
+    },
+    {
+      "path": "player-stats/companion/native_session.py",
+      "bytes": 11612,
+      "sha256": "e8f945b5ffef0abe3fc8bbf17fc93aa9680e95f39d268eced44577cfa84c68fc"
+    },
+    {
+      "path": "player-stats/companion/native_stats.py",
+      "bytes": 18939,
+      "sha256": "1d7fada9afddaa5669f8cb9d3591ba681a1c7e26ca886a8bc875718950d5a705"
+    },
+    {
+      "path": "player-stats/companion/outbox.py",
+      "bytes": 9059,
+      "sha256": "514e5ff2f1b191f5e41c1f8831fb52fd6a23ebd74cfe823d7284486ccbd14b66"
+    },
+    {
+      "path": "player-stats/companion/pricing.py",
+      "bytes": 9210,
+      "sha256": "98e7fa8b1bde0b87f9239985d9a403ed2ae1d0b4ec7b487e91aa8c3b9144e8b8"
+    },
+    {
+      "path": "player-stats/companion/receiver.py",
+      "bytes": 56543,
+      "sha256": "446eb2c5d23160d68575aebcccee7ca89471ab9e4e3b37077552771a9f08298b"
+    },
+    {
+      "path": "player-stats/companion/replay_capture.py",
+      "bytes": 32086,
+      "sha256": "4eff3a86dfa6fde29674431069c1eea8a19f91d54ac6a4bf714b8a095697b7cb"
+    },
+    {
+      "path": "player-stats/companion/replay_evidence.py",
+      "bytes": 4480,
+      "sha256": "6ae41d59038e081d9464b53b88ecb95338d2a406e51fe99fd3a18ff6e880d271"
+    },
+    {
+      "path": "player-stats/companion/replay_runtime.py",
+      "bytes": 5831,
+      "sha256": "ed00ed11190fa1c82ca79ebb561b9f31ac79f4036403e9a94872d31ced273b46"
+    },
+    {
+      "path": "player-stats/companion/replays.py",
+      "bytes": 6695,
+      "sha256": "0a2cf6b036a29279b2f52e96bbf424107d7cc424e0575eed882f90e0deee7401"
+    },
+    {
+      "path": "player-stats/companion/resources.py",
+      "bytes": 2476,
+      "sha256": "65fb451bf4a4e801e229d177aaf7578d005325dc96cb11066ececdbfc23ccbcd"
+    },
+    {
+      "path": "player-stats/companion/runtime.py",
+      "bytes": 6822,
+      "sha256": "75292ad3c8a8cb6fa96190015dae75dbc02b3e14dcf984de8e11439d7b089b6b"
+    },
+    {
+      "path": "player-stats/companion/server_sessions.py",
+      "bytes": 23508,
+      "sha256": "f3d668e4b83307c24f7ab8c794f173f0923d84569d89268a3b48c37f2c9aec19"
+    },
+    {
+      "path": "player-stats/companion/service.py",
+      "bytes": 7943,
+      "sha256": "4f059cc5156143ebb6eac1e61ff0eae77695c41b410da1fd6c85cf7bff83065f"
+    },
+    {
+      "path": "player-stats/companion/state.py",
+      "bytes": 1201,
+      "sha256": "6c9cd160d25dbdc7d2f53818d60c36b7a9d2e25120f8cf74bdff264e914f8171"
+    },
+    {
+      "path": "player-stats/companion/updater.py",
+      "bytes": 6935,
+      "sha256": "cff60cbb639d9e2e0d8c67ca6adc79e25c59ca554f1012c17cafd428e5c64bda"
+    },
+    {
+      "path": "player-stats/companion/upload.py",
+      "bytes": 9231,
+      "sha256": "84735ea8ea30ee571d81ecf4f00f4dbf7484760783304b0679f054f93a6ae350"
+    },
+    {
+      "path": "player-stats/companion/windows.py",
+      "bytes": 22126,
+      "sha256": "a4548c15bc12f84bd808dc0e7dc14c7c13392f02f987288403e8c4c06d74dbcc"
+    },
+    {
+      "path": "player-stats/data/action-names.json",
+      "bytes": 5988,
+      "sha256": "28575424e0ad01fc38b565444215acd124f6b4d446fa55104ca9560d4ce5b1a2"
+    },
+    {
+      "path": "player-stats/data/offmap-map.json",
+      "bytes": 25521,
+      "sha256": "152e854547792cb36533c0e53ab5bbf92ef0a8a27e6b6712c922c40056fb3a1d"
+    },
+    {
+      "path": "player-stats/data/production-timing.json",
+      "bytes": 145070,
+      "sha256": "7aed5c7faf84665ad9456553d92035f866ca073f0880a771d7e7ee8f417a3655"
+    },
+    {
+      "path": "player-stats/data/transport-classification.json",
+      "bytes": 2019628,
+      "sha256": "5c6d51010f15cd3ef78c568137a47dfe7a3e156cdb1a515fba7570e63d8d4f66"
+    },
+    {
+      "path": "player-stats/data/unit-guid-map.json",
+      "bytes": 680161,
+      "sha256": "623ed8fca41b487ee4ca56aadd46e7d92581134ead24969fd8fd3c787ca49915"
+    },
+    {
+      "path": "player-stats/export_companion.py",
+      "bytes": 7069,
+      "sha256": "c9bab65df3f967d8a3fd2999babf8b9170e62a0252dde870cbd1286b3f44c51c"
+    },
+    {
+      "path": "player-stats/player_companion.py",
+      "bytes": 145,
+      "sha256": "5f87a188ecf795e2577e87dfa5389fb3fdac04f42766998458c0e74038f6f2af"
+    },
+    {
+      "path": "player-stats/production_summary.py",
+      "bytes": 17387,
+      "sha256": "6d3a166d668ee4ce367fb869b13d13c56f18a708c42a1915f15ab3decc0b6160"
+    },
+    {
+      "path": "player-stats/publication/.gitattributes",
+      "bytes": 154,
+      "sha256": "e54974a59ebf5bd02c3ba55979a5d417fbf8475aa15e9f66bb77f169d95f738a"
+    },
+    {
+      "path": "player-stats/publication/.gitignore",
+      "bytes": 186,
+      "sha256": "cbc0ac8ff924a53cfb6804c573373b545aa14bd75f4966bcc95f352b414bddcf"
+    },
+    {
+      "path": "player-stats/publication/README.md",
+      "bytes": 6488,
+      "sha256": "e864248d9f993e5f9de53017f6316137b9be6202ba96e88252ccdaa565c5f88b"
+    },
+    {
+      "path": "player-stats/publication/THIRD_PARTY_NOTICES.md",
+      "bytes": 1741,
+      "sha256": "73f2136fc050b9f7b72bbef55a708a85383bc9c7827ac8c17b5ec05123bb2d0e"
+    },
+    {
+      "path": "player-stats/replay_identity.py",
+      "bytes": 10738,
+      "sha256": "2daf708e296d511c7d2eb1694aadf4d58719e6d5ef4f6fcc168c619951fac63e"
+    },
+    {
+      "path": "player-stats/replay_orders.py",
+      "bytes": 16503,
+      "sha256": "72aee7efb22c6d2293616d972c9261a7fb5ea006d493feb8a08416b6d26d7303"
+    },
+    {
+      "path": "player-stats/replay_parser.py",
+      "bytes": 23128,
+      "sha256": "72b8a62d116561dc07b76a2d22065d7905aabb2ffaa46b09510d149269e6a078"
+    },
+    {
+      "path": "player-stats/replay_stream.py",
+      "bytes": 20671,
+      "sha256": "6bb6a561d5cdc0bf02b831f9306c591a0644a55035214d7046150f90a6e5b720"
+    },
+    {
+      "path": "player-stats/requirements-build.txt",
+      "bytes": 20,
+      "sha256": "11c0aa19d14e0081c5bc5c1c6683b057d81223478639fab99a9c603d76828204"
+    },
+    {
+      "path": "player-stats/run_companion.cmd",
+      "bytes": 430,
+      "sha256": "ab0c9c98df7ce319b2a2a0ec6254370e68e29c8f16780b7d42a9d86aec495728"
+    },
+    {
+      "path": "player-stats/style_model.py",
+      "bytes": 13448,
+      "sha256": "2ffe155568c892d495875f533cf0d5af5dcdb2f846ceed1d74f857e0cf82f067"
+    },
+    {
+      "path": "player-stats/tendency_model.py",
+      "bytes": 23982,
+      "sha256": "d961e200f51a53de4915df07743277e0fc65ef85798d46a2e91c8061bd94dce9"
+    },
+    {
+      "path": "player-stats/test_companion_attribution.py",
+      "bytes": 13777,
+      "sha256": "eeb41277ad33cf9dbf05b97f8532d04edefc35b88d8b4ae6675d0c2ec7c5991c"
+    },
+    {
+      "path": "player-stats/test_companion_bootstrap.py",
+      "bytes": 12500,
+      "sha256": "6c70d720c022bf697cddde1cacc48ecd9ef9d52cfd4708e8250ef37654929dbf"
+    },
+    {
+      "path": "player-stats/test_companion_catalog.py",
+      "bytes": 17992,
+      "sha256": "d71cb18096de94d105b39ddc4b88cfbc8aebbe0eaa91527fba3603fcfcad5c1c"
+    },
+    {
+      "path": "player-stats/test_companion_catalog_client.py",
+      "bytes": 5947,
+      "sha256": "85093fea56d0f462a921820ab0555ee08fb1b1b9b946c34fd1f1becc155357a4"
+    },
+    {
+      "path": "player-stats/test_companion_combat.py",
+      "bytes": 24494,
+      "sha256": "8cd2d989f71c1b451738c9497a24b18c8fd6be6e8a372fc3748a378877cf6204"
+    },
+    {
+      "path": "player-stats/test_companion_core.py",
+      "bytes": 13574,
+      "sha256": "7d845240e8d444ed9a3c42e11221111bb88f09a4f4fead0e9a0269c5ed4a1e5d"
+    },
+    {
+      "path": "player-stats/test_companion_credentials.py",
+      "bytes": 7255,
+      "sha256": "4a790e7e1889d49335a81ab46dd178128b4e174eb58f6e127260263ff2a9b14a"
+    },
+    {
+      "path": "player-stats/test_companion_defaults.py",
+      "bytes": 7240,
+      "sha256": "8327cb1b25cc23a918a8b66f612a430336b49828e8fa70bdc8547f0ddd298d40"
+    },
+    {
+      "path": "player-stats/test_companion_delivery.py",
+      "bytes": 16351,
+      "sha256": "ec96f51785c4746879f0bf936119a4a4b9ae3368c7876e3323978ca299e206da"
+    },
+    {
+      "path": "player-stats/test_companion_desktop.py",
+      "bytes": 62487,
+      "sha256": "41ea7ad9f480bf7f544098a9963d5d3578d710cc0a878767aa323a2bbc3d4299"
+    },
+    {
+      "path": "player-stats/test_companion_enrollment.py",
+      "bytes": 7867,
+      "sha256": "6082fe6b222befa01d2e630a89590c53a36b3a3c7422dab25c8450380f04b673"
+    },
+    {
+      "path": "player-stats/test_companion_file_access.py",
+      "bytes": 12395,
+      "sha256": "f2ef611ecb508dcea107047aa32a438123347bb29b574af328996506691cd72d"
+    },
+    {
+      "path": "player-stats/test_companion_live_capture.py",
+      "bytes": 18422,
+      "sha256": "fc5d9a9b4cfe923eec6ca778883e370417a4a3a46fdbb3f36433f3b044234ff6"
+    },
+    {
+      "path": "player-stats/test_companion_live_integration.py",
+      "bytes": 11903,
+      "sha256": "41be31bb87c2fc41607880a9b6de29772142c9476c7bf993e8a966f8ec129eaa"
+    },
+    {
+      "path": "player-stats/test_companion_live_runtime.py",
+      "bytes": 10567,
+      "sha256": "2ec5aa1bf9b6a0e44358645deb8fcd93a43b3ef846d8c7e25dcf3b3ad9bac09e"
+    },
+    {
+      "path": "player-stats/test_companion_local_replay_library.py",
+      "bytes": 7569,
+      "sha256": "afb454da95b666cab1689eaf5296dbac30bda7c34fdba421282edb0c9ac50191"
+    },
+    {
+      "path": "player-stats/test_companion_native_report.py",
+      "bytes": 27587,
+      "sha256": "6a26db69e8cf9644857e3c7c47deaa3d72831b088f8e3eface18ee4665d74c22"
+    },
+    {
+      "path": "player-stats/test_companion_native_session.py",
+      "bytes": 18977,
+      "sha256": "d44034a30e37164f496e6f9ab2383716cfa644259272c33c00f18179f60bf591"
+    },
+    {
+      "path": "player-stats/test_companion_native_stats.py",
+      "bytes": 14658,
+      "sha256": "0485fbba210e8971232784f6b9aee3d266a697589339cb5a9038152f2d3122c0"
+    },
+    {
+      "path": "player-stats/test_companion_readonly_database.py",
+      "bytes": 3083,
+      "sha256": "a43fc36ba25f7a1f95279ee569fa99d4d62545b426d44a4018f3226d533dd2bb"
+    },
+    {
+      "path": "player-stats/test_companion_receiver.py",
+      "bytes": 46127,
+      "sha256": "477bad35b52ec85fa2e6e531e3bcac09589aa08bcf310b77836f9d294bf02fa0"
+    },
+    {
+      "path": "player-stats/test_companion_registry.py",
+      "bytes": 9072,
+      "sha256": "f16e6b613c4343bf9e3cca7eec694ffc98ada8384993cdca5faa95fe15b5e86a"
+    },
+    {
+      "path": "player-stats/test_companion_replay_capture.py",
+      "bytes": 30459,
+      "sha256": "51be0c70be5a403027561d5f81432303c700a0ae4b94b1f5dbe44a306d1e4274"
+    },
+    {
+      "path": "player-stats/test_companion_replay_evidence.py",
+      "bytes": 4479,
+      "sha256": "32c3e753cca2767a1ac3a9eaa3dabc0f1808976b7efd09beb02d22de29306355"
+    },
+    {
+      "path": "player-stats/test_companion_replay_integration.py",
+      "bytes": 13002,
+      "sha256": "b708b3d61f18ddc3ce1206a82d3c1ab9775f5d2469906a9ef45a1ab49c9e91e1"
+    },
+    {
+      "path": "player-stats/test_companion_replay_runtime.py",
+      "bytes": 5635,
+      "sha256": "ec59f149580d9e3e4b3d6377ae2ba3dcc9c516e8d84edcf62a5ce7415ce654fa"
+    },
+    {
+      "path": "player-stats/test_companion_report_payload.py",
+      "bytes": 3903,
+      "sha256": "668eff4cab3899244812e8115d7ba5ef12286f5259db0383db6132aab42b5806"
+    },
+    {
+      "path": "player-stats/test_companion_runtime.py",
+      "bytes": 10421,
+      "sha256": "2b484aa677ae5d0d3532d7090c45be974761b3a0cec29559f2732a4f51097e83"
+    },
+    {
+      "path": "player-stats/test_companion_server_sessions.py",
+      "bytes": 20106,
+      "sha256": "9234613bc1b12b8be060af3b980158d2104bbb288412be28508f0801da5cb7ff"
+    },
+    {
+      "path": "player-stats/test_companion_stats_integration.py",
+      "bytes": 14852,
+      "sha256": "7d2bb71d0660c736ad6682723408c0a98bdb870e4a0cfd1024e0d3cf87f24402"
+    },
+    {
+      "path": "player-stats/test_companion_updater.py",
+      "bytes": 7092,
+      "sha256": "07d9e4dd7b73ca95c979b972f03c9ee7947d79020f63a516ad8f7979d63f2abf"
+    },
+    {
+      "path": "player-stats/test_companion_windows.py",
+      "bytes": 12620,
+      "sha256": "f66cb85d90c6eef9e1c9bd70b29b74ad9ab7c647521470d585402a9aac74aa66"
+    },
+    {
+      "path": "player-stats/test_production_cancellations.py",
+      "bytes": 13273,
+      "sha256": "c4e89ead2bb2228b983297d20a33f96f1bbed279668593c16916070dc617d74a"
+    },
+    {
+      "path": "player-stats/test_production_summary.py",
+      "bytes": 4003,
+      "sha256": "35067235b77bf8e687ed4e29cec95c41024437d607b4e4d4107cbdf34c4565ee"
+    },
+    {
+      "path": "player-stats/test_replay_identity.py",
+      "bytes": 6383,
+      "sha256": "b3b88d214d94a39c69ccc220f03696a660750008125293b22e5aed28104c36af"
+    },
+    {
+      "path": "player-stats/test_replay_orders.py",
+      "bytes": 11221,
+      "sha256": "88478b0ea0eb689e9413a1ce13477507ce7ca83ea81fa48ff3f487dd1c3f449e"
+    },
+    {
+      "path": "player-stats/test_replay_stream.py",
+      "bytes": 9363,
+      "sha256": "e7248f4ee5c9f8754600c110af0f6fdeee4a16bbfbcb64ea82cbe57d80b5f53a"
+    },
+    {
+      "path": "player-stats/test_tendency_model.py",
+      "bytes": 21142,
+      "sha256": "ac58a345dab93334a45aa4d7a2b97e94cd441cd49811ec2c9e9ddfac4c5aad58"
+    }
+  ]
+}

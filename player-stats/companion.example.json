@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "collection_mode": "auto",
+  "rooms": [],
+  "game_executable": null,
+  "replay_directories": [],
+  "data_directory": "companion-data-v3",
+  "online_enabled": true,
+  "upload_url": "https://sd2.rui-blog.link/api/companion/v3/task-reports",
+  "catalog_url": "https://sd2.rui-blog.link/api/companion/v3/rooms",
+  "token_env": "SD2_COMPANION_TOKEN",
+  "poll_seconds": 0.5,
+  "automatic_updates": true,
+  "update_url": "https://sd2.rui-blog.link/downloads/sd2-companion/update.json",
+  "update_interval_seconds": 21600
+}

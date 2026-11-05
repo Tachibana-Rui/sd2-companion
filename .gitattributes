@@ -1,0 +1,3 @@
+# Exact bytes matter: the valuation catalog checksums its JSON resources.
+# This also keeps SOURCE_MANIFEST.json valid across checkout platforms.
+* -text
