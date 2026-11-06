@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import queue
 import re
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -38,9 +39,10 @@ _TEXT = {
                 "uploads matches played on the [ASIA-JP] server for analysis.",
                 "对局结束后，本程序从游戏内存读取任务报告-游戏时间表，并把在 [ASIA-JP] 服务器上进行的对局"
                 "自动上传到服务器做数据分析。"),
-    "intro_3": ("You can also play a local replay in game: the companion analyses its kills and losses here on "
-                "your machine and never uploads it.",
-                "也可以在游戏里播放某一局本地录像，由本程序直接在本机分析击杀数据，不需要上传。"),
+    "intro_3": ("You can also play a local replay in game to analyse its kills and losses locally. "
+                "Use File → Link local replay to server match to submit that analysis for server matching.",
+                "也可以在游戏里播放本地录像，在本机分析击杀数据。需要关联服务器对局时，"
+                "请选择“文件 → 将本地录像关联到服务器对局”。"),
     "menu_file": ("File", "文件"),
     "menu_open_reports": ("Open report folder", "打开报告目录"),
     "menu_open_replays": ("Open SD2 local replay folder", "打开 SD2 本地录像目录"),
@@ -49,7 +51,8 @@ _TEXT = {
     "replays_open_failed": ("The SD2 local replay folder could not be opened.", "无法打开 SD2 本地录像目录。"),
     "online_enabled": ("Record matches online automatically", "自动在线记录对局"),
     "online_restart": ("Restart the companion to apply this change.", "重新启动助手后此更改生效。"),
-    "menu_link_replay": ("Link downloaded replay to selected match…", "为选中对局关联已下载录像…"),
+    "menu_link_replay": ("Add local replay to selected analysis…", "为所选分析补充本地录像…"),
+    "menu_link_server": ("Link local replay to server match…", "将本地录像关联到服务器对局…"),
     "menu_settings": ("Settings", "设置"),
     "menu_exit": ("Exit", "退出"),
     "menu_help": ("Help", "帮助"),
@@ -74,12 +77,12 @@ _TEXT = {
                               "上传设置已保存，请重新启动助手连接。凭据保存在 Windows 凭据管理器中。"),
     "settings_upload_failed": ("Upload settings could not be saved. Use a valid HTTPS address and check Windows Credential Manager access.",
                                "上传设置保存失败。请检查 HTTPS 地址及 Windows 凭据管理器访问权限。"),
-    "counts": ("Analyzed: {analyzed}　Unlinked: {unlinked}　Queued: {queued}　"
+    "counts": ("Analyzed: {analyzed}　Local only: {unlinked}　Queued: {queued}　"
                "Received by server: {received}　Upload failed: {failed}",
-               "已分析：{analyzed}　待关联：{unlinked}　待传：{queued}　"
+               "已分析：{analyzed}　仅本地：{unlinked}　待传：{queued}　"
                "服务器已收件：{received}　上传失败：{failed}"),
-    "counts_pending": ("Analyzed: —　Unlinked: —　Queued: —　Received by server: —　Upload failed: —",
-                       "已分析：—　待关联：—　待传：—　服务器已收件：—　上传失败：—"),
+    "counts_pending": ("Analyzed: —　Local only: —　Queued: —　Received by server: —　Upload failed: —",
+                       "已分析：—　仅本地：—　待传：—　服务器已收件：—　上传失败：—"),
     "filter_label": ("Show:", "显示："),
     "filter_all": ("All", "全部"),
     "filter_local": ("Local replay", "本地录像"),
@@ -120,7 +123,7 @@ _STATUS_EN = {
     "desktop_starting": "Starting live and local replay capture…",
     "waiting_for_replay_file_access": "Waiting for the game to open a local replay.",
     "game_not_running": "Waiting for Steel Division 2 to start.",
-    "replay_file_access_observed": "Replay access detected; waiting for the whole file.",
+    "replay_file_access_observed": "Game replay access detected; monitoring the debrief timeline.",
     "replay_file_identified": "Replay identified; waiting for the debrief.",
     "replay_report_queued": "Debrief timeline saved.",
     "replay_report_waiting_for_stable_file": "The replay is still being written; waiting for it to settle.",
@@ -213,7 +216,7 @@ _STATUS = {
     "desktop_starting": "正在启动实时完赛与本地重放采集…",
     "waiting_for_replay_file_access": "等待游戏打开本地录像。",
     "game_not_running": "等待 Steel Division 2 启动。",
-    "replay_file_access_observed": "已检测到游戏访问录像，等待读取完整文件。",
+    "replay_file_access_observed": "已检测到游戏读取录像，正在监测任务报告时间表。",
     "replay_file_identified": "已识别录像，等待任务报告。",
     "replay_report_queued": "任务报告时间表已保存。",
     "replay_report_waiting_for_stable_file": "录像正在保存，等待文件稳定。",
@@ -850,6 +853,52 @@ class _MenuEntry:
         self.menu.entryconfigure(self.index, **options)
 
 
+class _SortableTable:
+    """Sort raw values while keeping formatting and row identity independent."""
+
+    def __init__(self, tree, headings, *, column, reverse=True):
+        self.tree, self.headings = tree, dict(headings)
+        self.column, self.reverse = column, reverse
+        self.rows = []
+        for name in self.headings:
+            tree.heading(name, command=lambda column=name: self.sort(column))
+        self._headings()
+
+    def _headings(self):
+        for column, label in self.headings.items():
+            marker = (" ▼" if self.reverse else " ▲") if column == self.column else ""
+            self.tree.heading(column, text=label + marker)
+
+    def set_rows(self, rows):
+        """Rows contain a stable id, displayed values and raw column values."""
+        self.rows = list(rows)
+        self._render()
+
+    def sort(self, column):
+        self.reverse = not self.reverse if column == self.column else True
+        self.column = column
+        self._headings()
+        self._render()
+
+    def _render(self):
+        selected, focus = self.tree.selection(), self.tree.focus()
+        available, missing = [], []
+        for row in self.rows:
+            value = row[2].get(self.column)
+            (missing if value is None else available).append(row)
+        available.sort(key=lambda row: (row[2][self.column].casefold()
+                                        if isinstance(row[2][self.column], str)
+                                        else row[2][self.column]), reverse=self.reverse)
+        self.tree.delete(*self.tree.get_children())
+        for row_id, values, _raw in available + missing:
+            self.tree.insert("", "end", iid=row_id, values=values)
+        retained = [row_id for row_id in selected if self.tree.exists(row_id)]
+        if retained:
+            self.tree.selection_set(retained)
+        if focus and self.tree.exists(focus):
+            self.tree.focus(focus)
+
+
 class DesktopApp:
     """Standard desktop shell: menu bar, header note, counters, results list.
 
@@ -864,7 +913,7 @@ class DesktopApp:
                ("players", "column_players", 420, "w"))
     # Defaults keep partially built instances (and tests) usable without __init__.
     language = "en"
-    sort_column, sort_reverse = "duration", True
+    sort_column, sort_reverse = "analyzed", True
     visible_entries = ()
     pump_id = None
 
@@ -890,7 +939,7 @@ class DesktopApp:
         self.entries = []
         self.visible_entries = []
         self.filter_kind = "all"
-        self.sort_column, self.sort_reverse = "ended", True
+        self.sort_column, self.sort_reverse = "analyzed", True
         self.language = _language(getattr(config, "language", "en"))
         self.status_var = tk.StringVar(value=self._t("status_starting"))
         self.counts_var = tk.StringVar(value=self._t("counts_pending"))
@@ -954,6 +1003,7 @@ class DesktopApp:
         file_menu = self.tk.Menu(menu, tearoff=False)
         self._add_command(file_menu, self._t("menu_open_reports"), self.open_exports)
         self._add_command(file_menu, self._t("menu_open_replays"), self.open_replays_directory)
+        self._add_command(file_menu, self._t("menu_link_server"), self.link_selected_server_match)
         self._add_command(file_menu, self._t("menu_link_replay"), self.link_selected_replay)
         self._add_command(file_menu, self._t("menu_settings"), self.open_settings)
         file_menu.add_separator()
@@ -1024,6 +1074,7 @@ class DesktopApp:
             self.tree.heading(name, text=self._t(heading_key), anchor=anchor,
                               command=lambda column=name: self._sort_entries(column))
             self.tree.column(name, width=width, anchor=anchor, stretch=name in ("map", "players"))
+        self._update_entry_headings()
         scroll = ttk.Scrollbar(table, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=scroll.set)
         self.tree.pack(side="left", fill="both", expand=True)
@@ -1035,6 +1086,15 @@ class DesktopApp:
     # -- results list -----------------------------------------------------
     def _refresh_entries(self):
         """Rebuild the list from the inventory; report contents stay untouched."""
+        selected_fingerprint = None
+        tree = getattr(self, "tree", None)
+        if tree is not None:
+            selection = tree.selection()
+            if selection:
+                try:
+                    selected_fingerprint = self.visible_entries[int(selection[0])]["fingerprint"]
+                except (ValueError, IndexError, KeyError):
+                    pass
         inventory = getattr(self.controller, "inventory", None)
         if inventory is not None:
             try:
@@ -1052,6 +1112,9 @@ class DesktopApp:
                     self._t("kind_local") if entry.get("kind") == "local" else self._t("kind_online"),
                     _duration_text(entry.get("duration")), _stamp(entry.get("analyzed_at")),
                     entry.get("map") or "—", _names_text(entry.get("names"))))
+                if selected_fingerprint and entry.get("fingerprint") == selected_fingerprint:
+                    self.tree.selection_set(str(index))
+                    self.tree.focus(str(index))
         if getattr(self, "empty_note", None) is not None:
             if not rows:
                 note = self._t("empty")
@@ -1062,23 +1125,31 @@ class DesktopApp:
             self.empty_note.configure(text=note)
 
     def _sorted_entries(self, rows):
-        key = getattr(self, "sort_column", "duration")
-        accessors = {"kind": lambda item: item.get("kind") or "",
-                     "duration": lambda item: item.get("duration") if item.get("duration") is not None else -1,
-                     "analyzed": lambda item: item.get("analyzed_at") or 0,
-                     "map": lambda item: (item.get("map") or "").casefold(),
-                     "players": lambda item: ", ".join(item.get("names") or ()).casefold()}
+        key = getattr(self, "sort_column", "analyzed")
+        accessors = {"kind": lambda item: item.get("kind") or None,
+                     "duration": lambda item: item.get("duration"),
+                     "analyzed": lambda item: item.get("analyzed_at") or None,
+                     "map": lambda item: (item.get("map") or "").casefold() or None,
+                     "players": lambda item: ", ".join(item.get("names") or ()).casefold() or None}
         accessor = accessors.get(key)
         if accessor is None:
             return list(rows)
-        return sorted(rows, key=lambda item: (accessor(item), item.get("fingerprint", "")),
-                      reverse=bool(getattr(self, "sort_reverse", False)))
+        known = [item for item in rows if accessor(item) is not None]
+        unknown = [item for item in rows if accessor(item) is None]
+        return sorted(known, key=lambda item: (accessor(item), item.get("fingerprint", "")),
+                      reverse=bool(getattr(self, "sort_reverse", False))) + unknown
 
     def _sort_entries(self, column):
         """Header click: reverse the active column, otherwise start descending."""
         self.sort_reverse = (not self.sort_reverse) if column == self.sort_column else True
         self.sort_column = column
+        self._update_entry_headings()
         self._refresh_entries()
+
+    def _update_entry_headings(self):
+        for name, heading_key, _width, _anchor in self.COLUMNS:
+            marker = (" ▼" if self.sort_reverse else " ▲") if name == self.sort_column else ""
+            self.tree.heading(name, text=self._t(heading_key) + marker)
 
     # -- help menu --------------------------------------------------------
     def show_usage(self):
@@ -1092,15 +1163,17 @@ class DesktopApp:
              "2. 对局结束并打开任务报告后，程序从游戏内存读取「任务报告-游戏时间表」。"),
             ("3. Matches on the [ASIA-JP] server upload automatically for analysis;" if english else
              "3. 在 [ASIA-JP] 服务器上进行的对局会自动上传服务器做数据分析；"),
-            ("   other matches stay local and show as unlinked." if english else
-             "   其他来源的对局只保存在本机，显示为待关联。"),
-            ("4. You can also play a local replay in game: after the debrief the companion analyses its kills and losses locally, with no upload." if english else
-             "4. 也可以在游戏里播放某一局本地录像：任务报告结束后，程序直接在本机分析击杀数据，不需要上传。"),
+            ("   other matches stay local and show as local only." if english else
+             "   其他来源的对局只保存在本机，显示为仅本地。"),
+            ("4. You can also play a local replay in game: after the debrief the companion analyses its kills and losses locally." if english else
+             "4. 也可以在游戏里播放本地录像：任务报告结束后，程序在本机分析击杀数据。"),
             ("5. Double-click any row to open that match's local analysis." if english else
              "5. 列表里的每一行都可以双击，查看该局的本地分析结果。"),
             "",
-            ("\"Unlinked\" means the report was captured but no server session is confirmed yet;" if english else
-             "「待关联」表示报告已采集但还没有确认对应的服务器会话；"),
+            ("6. To match a local replay with a server record, select the analysis and use File → Link local replay to server match." if english else
+             "6. 如需关联服务器对局，先选中该局分析，再选择“文件 → 将本地录像关联到服务器对局”。"),
+            ("\"Local only\" means no upload has been prepared for that analysis; it does not mean a replay file is missing." if english else
+             "「仅本地」表示该局分析尚未准备上传，不表示录像文件缺失。"),
             ("\"received by server\" does not mean the server has accepted it." if english else
              "「服务器已收件」不代表服务器已经验收。"),
         )))
@@ -1220,6 +1293,78 @@ class DesktopApp:
             self._start_update_check()
 
     # -- local analysis ---------------------------------------------------
+    def link_selected_server_match(self):
+        selection = self.tree.selection()
+        if not selection:
+            _message("Select the analysis to link to a server match first." if self.language == "en" else
+                     "请先选中需要关联到服务器对局的分析。")
+            return
+        try:
+            entry = self.visible_entries[int(selection[0])]
+        except (ValueError, IndexError):
+            return
+        self.link_replay_to_server(entry)
+
+    def link_replay_to_server(self, entry):
+        """Explicit opt-in to submit an existing local timeline for verification."""
+        from tkinter import filedialog, messagebox
+        english = self.language == "en"
+        if not getattr(self.config, "online_enabled", True) or not getattr(self.config, "upload_url", None):
+            _message("Enable online recording in File → Settings, then restart the companion and try again."
+                     if english else "请先在“文件 → 设置”启用在线记录，重启软件后再关联。")
+            return
+        path = filedialog.askopenfilename(parent=self.root,
+            title="Choose the local replay to match with a server record" if english else
+                  "选择需要关联服务器对局的本地录像",
+            initialdir=str(default_replay_directories()[0]),
+            filetypes=[("Steel Division 2 replay", "*.rpl3 *.rpl")])
+        if not path:
+            return
+        report = _read_local_report(entry.get("path"))
+        if report is None:
+            _message("The report cannot be read." if english else "无法读取报告。")
+            return
+        if not messagebox.askyesno(self._t("menu_link_server"),
+            ("Submit this analysis's debrief timeline and replay identity to match it with a server record? "
+             "The .rpl3 file itself is not uploaded. The server verifies the complete replay fingerprint and players."
+             if english else "是否提交该局的任务报告时间表和录像标识，以关联服务器对局记录？"
+             "不会上传 .rpl3 文件本体。服务器将核对完整录像指纹和玩家信息。"), parent=self.root):
+            return
+        results = queue.Queue(maxsize=1)
+
+        def work():
+            try:
+                from .outbox import Outbox
+                from .replay_association import enqueue_association
+                outbox = Outbox(self.config.data_directory / "outbox.sqlite3")
+                enqueue_association(self.config.data_directory, report, path, outbox,
+                                    session_id=entry.get("session"), user_selected=True)
+                results.put(True)
+            except (OSError, ValueError, KeyError, TypeError, RuntimeError, ImportError, sqlite3.Error):
+                results.put(False)
+
+        def finish():
+            if self.destroyed or self.closing:
+                return
+            try:
+                success = results.get_nowait()
+            except queue.Empty:
+                self.root.after(150, finish)
+                return
+            self._refresh_entries()
+            self.status_var.set(("Server match association queued; waiting for server verification." if success else
+                                 "Server match association could not be queued.") if english else
+                                ("服务器对局关联已入队，等待服务器核验。" if success else "服务器对局关联未能入队。"))
+            _message(("Queued for upload. The server will verify the complete replay fingerprint and players "
+                      "before linking the match." if success else
+                      "Could not queue this analysis. Select the complete replay belonging to this match and try again.")
+                     if english else ("已加入上传队列。服务器将核对完整录像指纹和玩家信息，再关联对应对局。" if success else
+                                      "无法加入上传队列。请确认所选录像完整且属于该局，再重试。"))
+
+        threading.Thread(target=work, name="sd2-server-replay-link", daemon=True).start()
+        self.status_var.set("Preparing server match association…" if english else "正在准备关联服务器对局…")
+        self.root.after(150, finish)
+
     def link_selected_replay(self):
         selection = self.tree.selection()
         if not selection:
@@ -1235,7 +1380,7 @@ class DesktopApp:
         from tkinter import filedialog
         english = self.language == "en"
         path = filedialog.askopenfilename(parent=self.root,
-            title="Choose the replay for this match" if english else "选择该局对应的录像",
+            title="Add this analysis's local replay" if english else "为该局分析补充本地录像",
             initialdir=str(default_replay_directories()[0]),
             filetypes=[("Steel Division 2 replay", "*.rpl3 *.rpl")])
         if not path:
@@ -1263,9 +1408,11 @@ class DesktopApp:
                 self.root.after(150, finish)
                 return
             self._refresh_entries()
-            _message(("Replay linked. Reopen the match to view its map and investment P." if success else
+            _message(("Local replay added to this analysis. Reopen it to view the map and investment P. "
+                      "This does not confirm a match in the server archive." if success else
                       "The replay could not be linked. Check that it is complete and belongs to this match.")
-                     if english else ("录像已关联。重新打开该局即可查看地图和投入 P。" if success else
+                     if english else ("本地录像已补充到该局分析，重新打开即可查看地图和投入 P。"
+                                      "此操作不代表已关联服务器对局记录。" if success else
                                       "无法关联录像。请确认文件已下载完成，且为该局的录像。"))
 
         threading.Thread(target=work, name="sd2-local-replay-link", daemon=True).start()
@@ -1315,6 +1462,9 @@ class DesktopApp:
                        command=window.destroy).pack(anchor="e", pady=(12, 0))
             return
         archive = replay_evidence.load(self.config.data_directory, entry.get("replay"))
+        if not entry.get("linked"):
+            ttk.Button(frame, text=self._t("menu_link_server"),
+                       command=lambda: self.link_replay_to_server(entry)).pack(anchor="w", pady=(0, 8))
         derived, error = _local_analysis(payload, archive)
         if derived is None:
             ttk.Label(frame, text=(("Cannot value this match: " if english else "该局暂无法计算击杀估值：") + error),
@@ -1325,65 +1475,79 @@ class DesktopApp:
         players = derived.get("players") or []
         if archive is None:
             ttk.Label(frame, justify="left", wraplength=820, foreground="#a07040",
-                      text=("No replay investment evidence yet. Downloaded replays are matched automatically "
-                            "when the captured session is known. For older reports, choose this match's replay "
-                            "below to fill investment P and K ÷ P locally." if english else
-                            "该局尚无录像投入证据。已知会话的报告会自动匹配已下载录像；旧报告可在下方选择"
-                            "该局录像，在本机补齐投入 P 和 K ÷ P。")
+                      text=("This analysis has no local replay evidence yet. The companion checks the SD2 replay "
+                            "folder automatically. If the file is already there but was not identified, choose "
+                            "this match's .rpl3 below to fill its map, investment P and K / P locally." if english else
+                            "该局分析尚未取得本地录像证据。程序会自动检查 SD2 录像目录；若文件已存在但未识别，"
+                            "可在下方选择该局的 .rpl3，在本机补齐地图、投入 P 和 K / P。")
                       ).pack(anchor="w", pady=(0, 8))
-            ttk.Button(frame, text=("Choose downloaded replay…" if english else "选择已下载录像…"),
+            ttk.Button(frame, text=("Add this match's local .rpl3…" if english else "补充该局本地 .rpl3…"),
                        command=lambda: self.link_downloaded_replay(entry)).pack(anchor="w", pady=(0, 8))
         top = ttk.LabelFrame(frame, text=("Players (official scoring and all-component valuation)" if english else
                                           "参与玩家（官方计分与全部组件估值）"), padding=8)
         top.pack(fill="both", expand=True)
-        player_table = ttk.Treeview(top, columns=("name", "official_k", "official_l", "K", "L"),
+        player_table = ttk.Treeview(top, columns=("name", "kills", "official_k", "official_l", "K", "L"),
                                     show="headings", height=8)
-        headings = ((("name", "Player"), ("official_k", "Official kill points"),
+        headings = ((("name", "Player"), ("kills", "Kills"), ("official_k", "Official kill points"),
                      ("official_l", "Official loss points"), ("K", "Reported K"), ("L", "Reported L"))
-                    if english else (("name", "玩家"), ("official_k", "原版击杀分"), ("official_l", "原版损失分"),
+                    if english else (("name", "玩家"), ("kills", "击杀数"), ("official_k", "原版击杀分"), ("official_l", "原版损失分"),
                                      ("K", "报告击杀 K"), ("L", "报告损失 L")))
         for column, heading in headings:
             player_table.heading(column, text=heading)
-            player_table.column(column, width=300 if column == "name" else 110, anchor="w")
+            player_table.column(column, width=240 if column == "name" else 100, anchor="w")
         player_table.pack(fill="both", expand=True)
+        player_sorter = _SortableTable(player_table, headings, column="kills")
         bottom = ttk.LabelFrame(frame, text=("Selected player by model (all components, same valuation as the site)"
                                              if english else "该玩家按型号（全部组件，与网站同一套估值口径）"), padding=8)
         bottom.pack(fill="both", expand=True, pady=(10, 0))
-        model_table = ttk.Treeview(bottom, columns=("model", "P", "K", "L", "conversion", "exchange"),
+        model_table = ttk.Treeview(bottom, columns=("model", "kills", "P", "K", "L", "conversion", "exchange"),
                                    show="headings", height=8)
-        model_headings = ((("model", "Model"), ("P", "Investment P"), ("K", "Reported K"), ("L", "Reported L"),
+        model_headings = ((("model", "Model"), ("kills", "Kills"), ("P", "Investment P"), ("K", "Reported K"), ("L", "Reported L"),
                            ("conversion", "K / P"), ("exchange", "K / L")) if english else
-                          (("model", "型号"), ("P", "投入 P"), ("K", "报告击杀 K"), ("L", "报告损失 L"),
+                          (("model", "型号"), ("kills", "击杀数"), ("P", "投入 P"), ("K", "报告击杀 K"), ("L", "报告损失 L"),
                            ("conversion", "K / P"), ("exchange", "K / L")))
         for column, heading in model_headings:
             model_table.heading(column, text=heading)
-            model_table.column(column, width=320 if column == "model" else 90, anchor="w")
+            model_table.column(column, width=260 if column == "model" else 85, anchor="w")
         model_table.pack(fill="both", expand=True)
+        model_sorter = _SortableTable(model_table, model_headings, column="kills")
+        player_rows = []
         for index, player in enumerate(players):
             _scope, metrics = _scope_metrics(player)
-            player_table.insert("", "end", iid=str(index), values=(
+            player_rows.append((str(index), (
                 player.get("name") or ("Unnamed" if english else "未命名"),
+                _value(metrics.get("kill_count")),
                 _points(player.get("official_kill_points")), _points(player.get("official_loss_points")),
-                _value(metrics.get("K")), _value(metrics.get("L"))))
+                _value(metrics.get("K")), _value(metrics.get("L"))),
+                {"name": player.get("name") or "", "kills": metrics.get("kill_count"),
+                 "official_k": player.get("official_kill_points"), "official_l": player.get("official_loss_points"),
+                 "K": metrics.get("K"), "L": metrics.get("L")}))
+        player_sorter.set_rows(player_rows)
 
         def fill_models(_event=None):
-            model_table.delete(*model_table.get_children())
             selection = player_table.selection()
             if not selection:
+                model_sorter.set_rows([])
                 return
             player = players[int(selection[0])]
             scope, _metrics = _scope_metrics(player)
-            for unit in player.get("units") or []:
+            model_rows = []
+            for index, unit in enumerate(player.get("units") or []):
                 if unit.get("role_scope") != scope:
                     continue
-                model_table.insert("", "end", values=(
+                model_rows.append((str(index), (
                     unit.get("name") or ("Unidentified model" if english else "未确认型号"),
+                    _value(unit.get("kill_count")),
                     _value(unit.get("P_est")), _value(unit.get("K")), _value(unit.get("L")),
-                    _ratio(unit.get("conversion_ratio")), _ratio(unit.get("exchange_ratio"))))
+                    _ratio(unit.get("conversion_ratio")), _ratio(unit.get("exchange_ratio"))),
+                    {"model": unit.get("name") or "", "kills": unit.get("kill_count"),
+                     "P": unit.get("P_est"), "K": unit.get("K"), "L": unit.get("L"),
+                     "conversion": unit.get("conversion_ratio"), "exchange": unit.get("exchange_ratio")}))
+            model_sorter.set_rows(model_rows)
 
         player_table.bind("<<TreeviewSelect>>", fill_models)
         if players:
-            player_table.selection_set("0")
+            player_table.selection_set(player_table.get_children()[0])
             fill_models()
         ttk.Button(frame, text=("Close" if english else "关闭"),
                    command=window.destroy).pack(anchor="e", pady=(10, 0))

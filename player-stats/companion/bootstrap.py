@@ -12,6 +12,7 @@ import uuid
 from .config import DEFAULT_CATALOG_URL, DEFAULT_UPLOAD_URL
 from .credentials import (CredentialError, read_installation_token,
                           store_installation_token)
+from .http_transport import ServiceOpener
 
 REGISTRATION_URL = "https://sd2.rui-blog.link/api/companion/v3/installations"
 MAX_RESPONSE_BYTES = 16 * 1024
@@ -36,7 +37,7 @@ def can_register(config):
 
 class BootstrapClient:
     def __init__(self, config, installation_id, *, opener=None, read_token=None,
-                 store_token=None, timeout=6.0):
+                 store_token=None, timeout=15.0):
         if not can_register(config):
             raise BootstrapError("automatic_registration_unavailable")
         try:
@@ -47,7 +48,7 @@ class BootstrapClient:
         self.url = config.upload_url
         self.installation_id = installation_id
         self.timeout = timeout
-        self._opener = opener or request.build_opener(_NoRedirect())
+        self._opener = opener or ServiceOpener(_NoRedirect)
         self._read = read_token or read_installation_token
         self._store = store_token or store_installation_token
 

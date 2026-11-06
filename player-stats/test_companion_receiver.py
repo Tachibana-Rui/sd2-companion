@@ -134,6 +134,50 @@ class ReceiverStoreTests(unittest.TestCase):
             with self.subTest(index=index), self.assertRaises(ReceiverError):self.store.submit(candidate)
         self.assertEqual(self.store.status()['submissions']['total'], 0)
 
+    def test_selected_local_replay_matches_exact_archive_without_claiming_game_io(self):
+        archive = self.base / 'selected-replay.sqlite3'
+        sha = native_archive(archive)
+        store = ReceiverStore(self.path, archive_index=ArchiveIndex(archive))
+        report = replay_payload(sha=sha)
+        report['client_context_evidence'] = {
+            'association': 'user_selected_local_replay',
+            'roster_check': 'exact_player_user_id_alliance_multiset',
+            'full_replay_sha256_verified': True}
+        self.assertEqual(store.submit(report)['status'], 'accepted')
+        self.assertEqual(self.saved()['server_sha256'], sha)
+        self.assertEqual(json.loads(self.saved()['payload']), report)
+
+    def test_selected_local_replay_cannot_substitute_session_for_full_archive_hash(self):
+        archive = self.base / 'different-selected-replay.sqlite3'
+        native_archive(archive)
+        store = ReceiverStore(self.path, archive_index=ArchiveIndex(archive))
+        report = replay_payload(sha='f' * 64)
+        report['client_context_evidence'] = {
+            'association': 'user_selected_local_replay',
+            'roster_check': 'exact_player_user_id_alliance_multiset',
+            'full_replay_sha256_verified': True}
+        self.assertEqual(store.submit(report)['status'], 'pending_match')
+        self.assertIsNone(self.saved()['server_sha256'])
+
+    def test_selected_local_replay_requires_explicit_full_file_and_roster_checks(self):
+        evidence = {'association': 'user_selected_local_replay',
+                    'roster_check': 'exact_player_user_id_alliance_multiset',
+                    'full_replay_sha256_verified': True}
+        variants = []
+        for key in ('roster_check', 'full_replay_sha256_verified'):
+            candidate = dict(evidence)
+            del candidate[key]
+            variants.append(candidate)
+        variants.extend((dict(evidence, full_replay_sha256_verified=1),
+                         dict(evidence, file_body_io_observed=True),
+                         dict(evidence, association='native_replay_context')))
+        for candidate in variants:
+            with self.subTest(evidence=candidate), self.assertRaises(ReceiverError):
+                report = replay_payload()
+                report['client_context_evidence'] = candidate
+                self.store.submit(report)
+        self.assertEqual(self.store.status()['submissions']['total'], 0)
+
     def test_native_live_rejects_old_null_hash_fields(self):
         report = native_live_payload()
         report.update(client_replay_sha256=None, client_header_sha256=None)

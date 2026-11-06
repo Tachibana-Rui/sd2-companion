@@ -13,9 +13,10 @@ import subprocess
 import sys
 import tempfile
 from urllib.parse import urlsplit
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, Request
 
 from . import UPDATE_URL
+from .http_transport import ServiceOpener
 MAX_DOWNLOAD_BYTES = 256 * 1024 * 1024
 MAX_MANIFEST_BYTES = 64 * 1024
 
@@ -75,7 +76,7 @@ def parse_manifest(document, *, manifest_url=UPDATE_URL):
 def _open(url, *, opener=None):
     _origin(url)
     request = Request(url, headers={"User-Agent": "SD2-Companion-Updater/1", "Cache-Control": "no-cache"})
-    return (opener or build_opener(_NoRedirect())).open(request, timeout=20)
+    return (opener or ServiceOpener(_NoRedirect)).open(request, timeout=20)
 
 
 def check_for_update(current_version, *, manifest_url=UPDATE_URL, opener=None):

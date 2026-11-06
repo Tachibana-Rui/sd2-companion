@@ -814,8 +814,8 @@ class DesktopListFormatTests(unittest.TestCase):
                          ["Keep this window open while you play Steel Division 2.",
                           "When a match ends, the companion reads the debrief (game timeline) from game "
                           "memory and uploads matches played on the [ASIA-JP] server for analysis.",
-                          "You can also play a local replay in game: the companion analyses its kills and "
-                          "losses here on your machine and never uploads it."])
+                          "You can also play a local replay in game to analyse its kills and losses locally. "
+                          "Use File → Link local replay to server match to submit that analysis for server matching."])
         # The body starts with the sentences: no separate heading label.
         self.assertFalse(any("heading" in key for key in desktop._TEXT))
 
@@ -841,6 +841,184 @@ class DesktopListFormatTests(unittest.TestCase):
         first.reset_mock()
         app._fit_header(SimpleNamespace(width=100))
         first.configure.assert_called_once_with(wraplength=240)
+
+
+class DesktopServerAssociationTests(unittest.TestCase):
+    def app(self, directory):
+        app = object.__new__(DesktopApp)
+        app.language = "en"
+        app.root, app.status_var, app._refresh_entries = Mock(), Mock(), Mock()
+        app.config = SimpleNamespace(data_directory=Path(directory), online_enabled=True,
+                                     upload_url="https://example.invalid/api/companion/v3/task-reports")
+        app.destroyed = app.closing = False
+        return app
+
+    def test_local_mode_and_cancel_do_not_submit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = self.app(directory)
+            with patch("tkinter.filedialog.askopenfilename", return_value="test.rpl3") as choose, \
+                 patch("tkinter.messagebox.askyesno", return_value=False) as consent, \
+                 patch("companion.desktop._read_local_report", return_value={}), \
+                 patch("companion.desktop._message") as message, \
+                 patch("companion.replay_association.enqueue_association") as enqueue:
+                app.config.online_enabled = False
+                app.link_replay_to_server({"path": "report.json"})
+                choose.assert_not_called()
+                self.assertIn("Enable online recording", message.call_args.args[0])
+                app.config.online_enabled = True
+                app.link_replay_to_server({"path": "report.json"})
+                consent.assert_called_once()
+                enqueue.assert_not_called()
+                app.root.after.assert_not_called()
+
+    def test_explicit_action_queues_same_report_and_only_claims_pending_verification(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = self.app(directory)
+            report = {"rows": [], "native_players": []}
+            # Run the background target synchronously, leaving the UI completion
+            # callback separate as it is in the actual Tk event loop.
+            def thread(*, target, **_kwargs):
+                return SimpleNamespace(start=target)
+            with patch("tkinter.filedialog.askopenfilename", return_value="test.rpl3"), \
+                 patch("tkinter.messagebox.askyesno", return_value=True), \
+                 patch("companion.desktop._read_local_report", return_value=report), \
+                 patch("companion.desktop.threading.Thread", side_effect=thread), \
+                 patch("companion.desktop._message") as message, \
+                 patch("companion.replay_association.enqueue_association") as enqueue:
+                app.link_replay_to_server({"path": "report.json", "session": "known-session"})
+                self.assertEqual(enqueue.call_args.args[:3], (Path(directory), report, "test.rpl3"))
+                self.assertTrue(enqueue.call_args.kwargs["user_selected"])
+                self.assertEqual(enqueue.call_args.kwargs["session_id"], "known-session")
+                self.assertEqual(enqueue.call_args.args[3].path, Path(directory).resolve() / "outbox.sqlite3")
+                app.root.after.call_args.args[1]()
+                app._refresh_entries.assert_called_once()
+                self.assertIn("Queued for upload", message.call_args.args[0])
+                self.assertIn("before linking", message.call_args.args[0])
+                self.assertIn("waiting for server verification", app.status_var.set.call_args.args[0])
+
+
+class DesktopSortingTests(unittest.TestCase):
+    """Exercise real, hidden Tk tables and their actual heading callbacks."""
+
+    def setUp(self):
+        try:
+            import tkinter as tk
+            from tkinter import ttk
+            self.root = tk.Tk()
+            self.root.withdraw()
+        except Exception as exc:
+            self.skipTest("Tk display unavailable: " + type(exc).__name__)
+        self.tk, self.ttk = tk, ttk
+
+    def tearDown(self):
+        if hasattr(self, "root"):
+            self.root.destroy()
+
+    def click(self, table, column):
+        self.root.tk.call(table.heading(column)["command"])
+
+    def app(self):
+        app = object.__new__(DesktopApp)
+        app.root, app.tk, app.ttk = self.root, self.tk, self.ttk
+        app.language = "en"
+        app.controller = SimpleNamespace(inventory=None)
+        app.config = SimpleNamespace(data_directory=Path("unused"))
+        app.entries, app.visible_entries = [], []
+        app._build_list()
+        return app
+
+    def test_main_default_is_time_descending_and_every_header_toggles(self):
+        app = self.app()
+        older = {"fingerprint": "older", "kind": "local", "analyzed_at": 10,
+                 "duration": 9, "map": "Alpha", "names": ("Alpha",)}
+        newer = {"fingerprint": "newer", "kind": "online", "analyzed_at": 100,
+                 "duration": 100, "map": "Zulu", "names": ("Zulu",)}
+        app.entries = [older, newer]
+        app._refresh_entries()
+        self.assertEqual([row["fingerprint"] for row in app.visible_entries], ["newer", "older"])
+        self.assertIn("▼", app.tree.heading("analyzed")["text"])
+        # Select the older analysis, then reverse order: the selection follows
+        # the report, not the numeric position that happens to render it.
+        app.tree.selection_set("1")
+        self.click(app.tree, "analyzed")
+        self.assertEqual([row["fingerprint"] for row in app.visible_entries], ["older", "newer"])
+        self.assertEqual(app.tree.selection(), ("0",))
+        self.assertIn("▲", app.tree.heading("analyzed")["text"])
+        for column, *_ in app.COLUMNS:
+            if column == "analyzed":
+                continue
+            self.click(app.tree, column)
+            self.assertTrue(app.sort_reverse)
+            self.assertEqual(app.visible_entries[0]["fingerprint"], "newer")
+            self.click(app.tree, column)
+            self.assertFalse(app.sort_reverse)
+            self.assertEqual(app.visible_entries[0]["fingerprint"], "older")
+            selected = int(app.tree.selection()[0])
+            self.assertEqual(app.visible_entries[selected]["fingerprint"], "older")
+        # A background inventory refresh inserts a row but retains both sort
+        # direction and the selected report.
+        app.controller.inventory = SimpleNamespace(entries=lambda: [newer, older,
+            {**newer, "fingerprint": "newest", "analyzed_at": 1000, "names": ("Beta",)}])
+        app._refresh_entries()
+        selected = int(app.tree.selection()[0])
+        self.assertEqual(app.visible_entries[selected]["fingerprint"], "older")
+        self.assertEqual(app.sort_column, "players")
+        self.assertFalse(app.sort_reverse)
+
+    def test_missing_values_stay_last_in_both_directions(self):
+        app = self.app()
+        app.entries = [{"fingerprint": "missing", "duration": None},
+                       {"fingerprint": "short", "duration": 9},
+                       {"fingerprint": "long", "duration": 100}]
+        self.click(app.tree, "duration")
+        self.assertEqual([row["fingerprint"] for row in app.visible_entries], ["long", "short", "missing"])
+        self.click(app.tree, "duration")
+        self.assertEqual([row["fingerprint"] for row in app.visible_entries], ["short", "long", "missing"])
+
+    def test_analysis_uses_kill_counts_then_sorts_raw_numbers_and_ratios(self):
+        app = self.app()
+        def player(name, kills, points, units):
+            return {"name": name, "official_kill_points": points, "official_loss_points": points,
+                    "economy_by_scope": {"all_components": {"kill_count": kills, "K": points, "L": points}},
+                    "units": [{"role_scope": "all_components", **unit} for unit in units]}
+        players = [player("Nine", 9, 100, [{"name": "Wrong player's unit", "kill_count": 99}]),
+                   player("Twelve", 12, 9, [
+                       {"name": "One", "kill_count": 1, "P_est": 100, "K": 9, "L": 100,
+                        "conversion_ratio": 9.5, "exchange_ratio": None},
+                       {"name": "Twenty", "kill_count": 20, "P_est": 9, "K": 100, "L": 9,
+                        "conversion_ratio": 10.25, "exchange_ratio": 1.5}])]
+        with patch("companion.desktop._read_local_report", return_value={}), \
+             patch("companion.desktop.replay_evidence.load", return_value={}), \
+             patch("companion.desktop._local_analysis", return_value=({"players": players}, "")):
+            app.show_match_details({"path": "unused", "linked": True})
+        def descendants(widget):
+            for child in widget.winfo_children():
+                yield child
+                yield from descendants(child)
+        player_table, model_table = [widget for widget in descendants(self.root)
+                                     if isinstance(widget, self.ttk.Treeview) and widget is not app.tree]
+        self.assertEqual(player_table.get_children(), ("1", "0"))
+        self.assertEqual(player_table.selection(), ("1",))
+        self.assertEqual([model_table.set(item, "model") for item in model_table.get_children()], ["Twenty", "One"])
+        self.click(player_table, "official_k")
+        self.assertEqual(player_table.get_children(), ("0", "1"))
+        self.assertEqual(player_table.selection(), ("1",))
+        self.click(player_table, "official_k")
+        self.assertEqual(player_table.get_children(), ("1", "0"))
+        self.click(model_table, "conversion")
+        self.assertEqual([model_table.set(item, "model") for item in model_table.get_children()], ["Twenty", "One"])
+        self.click(model_table, "conversion")
+        self.assertEqual([model_table.set(item, "model") for item in model_table.get_children()], ["One", "Twenty"])
+        self.click(model_table, "exchange")
+        self.assertEqual([model_table.set(item, "model") for item in model_table.get_children()], ["Twenty", "One"])
+        self.click(model_table, "exchange")
+        self.assertEqual([model_table.set(item, "model") for item in model_table.get_children()], ["Twenty", "One"])
+        # Changing player keeps the chosen model sort and uses that player's
+        # stable record id even after the player table has been reordered.
+        player_table.selection_set("0")
+        self.root.update()
+        self.assertEqual(model_table.set(model_table.get_children()[0], "model"), "Wrong player's unit")
+        self.assertIn("▲", model_table.heading("exchange")["text"])
 
 
 class DesktopMapLabelTests(unittest.TestCase):

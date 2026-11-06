@@ -241,8 +241,16 @@ def validate_payload(payload):
         raise ReceiverError("invalid_context_evidence")
     _display_fields(evidence)
     if replay:
-        if (evidence.get("association") not in ("observed_game_file_read", "observed_game_file_write")
-                or evidence.get("file_body_io_observed") is not True):
+        observed = (evidence.get("association") in ("observed_game_file_read", "observed_game_file_write")
+                    and evidence.get("file_body_io_observed") is True)
+        selected = (evidence.get("association") == "user_selected_local_replay"
+                    and evidence.get("full_replay_sha256_verified") is True
+                    and evidence.get("roster_check") == "exact_player_user_id_alliance_multiset"
+                    and "file_body_io_observed" not in evidence)
+        # Explicitly selected files do not pretend to be observed game I/O.
+        # Both paths still require the exact archived bytes, session, build,
+        # map and full ID/alliance roster in ArchiveIndex._replay.
+        if not (observed or selected):
             raise ReceiverError("observed_replay_file_access_required")
     elif (evidence.get("association") != "native_game_session"
           or evidence.get("session_origin") != "native_game_setup"

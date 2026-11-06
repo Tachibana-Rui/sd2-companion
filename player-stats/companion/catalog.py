@@ -19,6 +19,7 @@ from urllib import error, request
 from urllib.parse import urlsplit
 
 from .config import ConfigError, parse_rooms
+from .http_transport import ServiceOpener
 
 
 CATALOG_PATH = "/api/companion/v3/catalog"
@@ -146,7 +147,7 @@ class RemoteCatalog:
     """Bounded catalog client that keeps the last good table in memory."""
 
     def __init__(self, url, *, token=None, token_env="SD2_COMPANION_TOKEN",
-                 interval=DEFAULT_INTERVAL_SECONDS, timeout=6.0,
+                 interval=DEFAULT_INTERVAL_SECONDS, timeout=15.0,
                  allow_loopback_http=False, opener=None, fetch=None, clock=time.monotonic):
         self.url = _validate_url(url, allow_loopback_http)
         if not isinstance(token_env, str) or not _TOKEN_ENV.match(token_env):
@@ -160,7 +161,7 @@ class RemoteCatalog:
         self.interval = float(interval)
         self.timeout = float(timeout)
         self.allow_loopback_http = allow_loopback_http
-        self._opener = opener or request.build_opener(_NoRedirect)
+        self._opener = opener or ServiceOpener(_NoRedirect)
         self._fetch = fetch or self._http_fetch
         self._clock = clock
         self.rooms = ()
@@ -255,9 +256,10 @@ class RemoteCatalog:
         else:
             self.state = "invalid"
         self.last_error = exc.code
-        # Retry a transient failure with the normal interval; back off on
-        # credentials/schema problems instead of hammering the endpoint.
-        self.next_refresh = now + (self.interval if exc.retryable else max(300.0, self.interval))
+        # A short startup/network outage must not leave a running desktop
+        # offline for the full ten-minute healthy refresh interval.
+        self.next_refresh = now + (min(60.0, self.interval) if exc.retryable
+                                   else max(300.0, self.interval))
 
     def _http_fetch(self, url, token, timeout, etag):
         headers = {"Authorization": "Bearer " + token, "Accept": "application/json",

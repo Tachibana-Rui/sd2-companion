@@ -13,6 +13,8 @@ SD2 Companion is a Windows companion for Steel Division 2. It reads the game's p
 3. Keep it running during your match. After the match, leave the debrief open while the companion reads the game timeline.
 4. Double-click a captured match for local analysis. **File → Open SD2 local replay folder** opens the game's local replay directory.
 
+The match list starts with the newest analysis first. Player and unit tables start with the highest kill count first; click a column heading to switch between ascending and descending order. To submit a local replay's captured timeline for a server match, select the analysis and choose **File → Link local replay to server match…**, then select its `.rpl3` file. The server requires the exact archived replay hash, session, build, map and player roster; queued or received reports are not a claim that a match has been found. Adding replay evidence for local map/production analysis alone does not submit a report.
+
 The current native reader targets game build **168061**. An unsupported executable is rejected instead of being read with guessed offsets. The application does not start or stop the game, inject code, modify game memory, or control game input.
 
 ### Data and permissions
@@ -65,6 +67,8 @@ SD2 Companion 是 Steel Division 2 的 Windows 伴随程序，用于读取任务
 2. 运行时允许管理员权限，以便监测游戏并只读访问已适配的游戏进程。无需填写 API 地址、账号或凭据。
 3. 对局期间保持运行，结束后停留在任务报告界面，软件自动读取游戏时间表。
 4. 双击已记录的对局查看本地分析；通过 **文件 → 打开 SD2 本地录像目录** 打开录像文件夹。
+
+对局列表默认按分析时间降序，玩家及单位表默认按击杀数降序；点击字段表头切换升序、降序。要把本地录像的时间表关联到服务器对局，选中分析记录，使用 **文件 → 将本地录像关联到服务器对局…** 并选择对应 `.rpl3` 文件。服务器严格核对归档录像的完整哈希、会话、版本、地图和玩家名单；已排队或已收件不代表关联成功。只为本地地图／生产投入分析补充录像时，不会提交报告。
 
 当前原生读取器适配游戏构建 **168061**，未适配的游戏文件会被拒绝，不会使用猜测的偏移读取。程序不会启动或关闭游戏，不注入代码、不修改游戏内存、不操作游戏输入。
 

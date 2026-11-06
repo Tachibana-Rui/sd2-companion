@@ -145,7 +145,7 @@ class RemoteCatalogTests(unittest.TestCase):
                 catalog.refresh(now=2000.0)
                 self.assertEqual((catalog.state, catalog.last_error), expected)
                 self.assertEqual([room.id for room in catalog.rooms], ["room-one"])
-                self.assertGreaterEqual(catalog.next_refresh, 2000.0 + 600.0)
+                self.assertEqual(catalog.next_refresh, 2000.0 + (60.0 if status == 503 else 600.0))
 
     def test_a_network_error_and_a_missing_credential_never_raise(self):
         def boom(*args):
