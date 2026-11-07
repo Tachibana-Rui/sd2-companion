@@ -104,8 +104,8 @@
     },
     {
       "path": "player-stats/companion/http_transport.py",
-      "bytes": 2413,
-      "sha256": "b4c55ec5546806e3cd4b086767e336b75843cca9652700b5579d1748e48e6dfc"
+      "bytes": 6079,
+      "sha256": "01022640889712106f2b6cecd284a710519dd7dda8c9d480bdbf0b1dfa5da48d"
     },
     {
       "path": "player-stats/companion/install-update.ps1",
@@ -219,8 +219,8 @@
     },
     {
       "path": "player-stats/companion/upload.py",
-      "bytes": 9231,
-      "sha256": "84735ea8ea30ee571d81ecf4f00f4dbf7484760783304b0679f054f93a6ae350"
+      "bytes": 9305,
+      "sha256": "6a7014f04f3af4ea9507e7202b46a97f7506c3e1624aadb7f6b7c563a560466e"
     },
     {
       "path": "player-stats/companion/windows.py",
@@ -389,8 +389,8 @@
     },
     {
       "path": "player-stats/test_companion_http_transport.py",
-      "bytes": 7096,
-      "sha256": "2c00fb89c9993b0ea030fff92276c0690afdfc597ba9b6df460703c441c9c472"
+      "bytes": 12318,
+      "sha256": "8e44168bf3ddc825b3b50eb78e42dec62c920ece46cc56e5f046aa62f1d2d43d"
     },
     {
       "path": "player-stats/test_companion_live_capture.py",

@@ -15,6 +15,8 @@ import time
 from urllib import error, request
 from urllib.parse import urlsplit
 
+from .http_transport import OfficialHTTPSHandler
+
 
 MAX_PAYLOAD_BYTES = 8 * 1024 * 1024
 MAX_RESPONSE_BYTES = 64 * 1024
@@ -132,7 +134,7 @@ class Uploader:
         self._token = token
         # A report endpoint is contacted directly. In particular, an HTTP test
         # endpoint must never be sent through a machine's configured proxy.
-        self._opener = request.build_opener(request.ProxyHandler({}), _NoRedirect())
+        self._opener = request.build_opener(request.ProxyHandler({}), _NoRedirect(), OfficialHTTPSHandler())
 
     def __repr__(self):
         return "Uploader(token=<redacted>)"
