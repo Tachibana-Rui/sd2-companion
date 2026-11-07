@@ -25,6 +25,26 @@ ACCEPTED_STATUSES = frozenset(("accepted", "pending_match", "duplicate"))
 _SUBMISSION_ID = re.compile(r"[A-Za-z0-9._:-]{1,160}\Z")
 _ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}\Z")
 
+_PENDING_REASONS = frozenset((
+    "archive_not_configured", "archive_match_pending", "archive_temporarily_unavailable",
+    "server_session_not_finished_or_unmatched", "server_session_archive_ambiguous",
+    "replay_sha256_not_analyzed", "native_roster_incomplete", "archive_match_ambiguous",
+    "archive_metadata_conflict", "archive_replay_invalid_report", "archive_replay_not_finished",
+    "archive_replay_metadata_mismatch", "archive_replay_roster_mismatch",
+    "server_session_roster_mismatch", "server_session_metadata_mismatch",
+))
+
+
+def safe_receipt(receipt, submission_id):
+    if (not isinstance(receipt, dict) or receipt.get("submission_id") != submission_id
+            or not isinstance(receipt.get("status"), str) or receipt["status"] not in ACCEPTED_STATUSES):
+        raise ValueError("invalid_receipt")
+    result = {"submission_id": submission_id, "status": receipt["status"]}
+    reason = receipt.get("pending_reason")
+    if receipt["status"] == "pending_match" and isinstance(reason, str) and reason in _PENDING_REASONS:
+        result["pending_reason"] = reason
+    return result
+
 
 def payload_bytes(payload, max_bytes=MAX_PAYLOAD_BYTES):
     """Serialize a submission deterministically without accepting JSON NaNs."""
@@ -200,6 +220,34 @@ class Uploader:
                 or not isinstance(receipt.get("status"), str)
                 or receipt["status"] not in ACCEPTED_STATUSES):
             raise UploadError("invalid_receipt", retryable=True, status_code=code)
-        # Do not return arbitrary response messages that might echo credentials
-        # or player data. These two fields are the complete acknowledgement.
-        return {"submission_id": submission_id, "status": receipt["status"]}
+        return safe_receipt(receipt, submission_id)
+
+    def query_receipt(self, submission_id):
+        """Read only this installation's small match status, never the raw report."""
+        if not isinstance(submission_id, str) or not re.fullmatch(r"[0-9a-f]{64}", submission_id):
+            raise ValueError("invalid_submission_id")
+        parts = urlsplit(self.url)
+        if not parts.path.endswith("/task-reports") or parts.query:
+            raise UploadError("receipt_endpoint_unavailable", retryable=False)
+        address = self.url.rsplit("/", 1)[0] + "/receipts/" + submission_id
+        outgoing = request.Request(address, headers={"Authorization": "Bearer " + self._token,
+            "Accept": "application/json", "User-Agent": "SD2-Companion/1"})
+        try:
+            with self._opener.open(outgoing, timeout=self.timeout) as response:
+                if response.headers.get_content_type() != "application/json":
+                    raise UploadError("invalid_receipt_type", retryable=True)
+                raw = response.read(self.max_response_bytes + 1)
+                if len(raw) > self.max_response_bytes:
+                    raise UploadError("receipt_too_large", retryable=True)
+            result = safe_receipt(json.loads(raw), submission_id)
+            if result["status"] not in ("accepted", "pending_match"):
+                raise ValueError("invalid_receipt")
+            return result
+        except error.HTTPError as exc:
+            code = exc.code
+            exc.close()
+            raise UploadError("receipt_http_" + str(code), retryable=code >= 500 or code == 429, status_code=code) from None
+        except (OSError, http.client.HTTPException):
+            raise UploadError("receipt_network_error", retryable=True) from None
+        except (ValueError, UnicodeError):
+            raise UploadError("invalid_receipt", retryable=True) from None

@@ -15,7 +15,7 @@ from unittest.mock import patch
 from urllib import request
 
 from companion.outbox import Outbox
-from companion.receiver import API_PATH, ArchiveIndex, MAX_ROWS, ReceiverError, ReceiverStore, create_server
+from companion.receiver import API_PATH, ArchiveIndex, CompositeArchiveIndex, MAX_ROWS, ReceiverError, ReceiverStore, create_server
 from companion.upload import MAX_PAYLOAD_BYTES, UploadError, Uploader
 from companion.server_sessions import ServerObservation, ServerSessionLedger
 
@@ -147,7 +147,7 @@ class ReceiverStoreTests(unittest.TestCase):
         self.assertEqual(self.saved()['server_sha256'], sha)
         self.assertEqual(json.loads(self.saved()['payload']), report)
 
-    def test_selected_local_replay_cannot_substitute_session_for_full_archive_hash(self):
+    def test_selected_local_replay_matches_unique_verified_server_session_when_bytes_differ(self):
         archive = self.base / 'different-selected-replay.sqlite3'
         native_archive(archive)
         store = ReceiverStore(self.path, archive_index=ArchiveIndex(archive))
@@ -156,8 +156,77 @@ class ReceiverStoreTests(unittest.TestCase):
             'association': 'user_selected_local_replay',
             'roster_check': 'exact_player_user_id_alliance_multiset',
             'full_replay_sha256_verified': True}
+        original = copy.deepcopy(report)
+        self.assertEqual(store.submit(report)['status'], 'accepted')
+        self.assertEqual(self.saved()['server_sha256'], 'c' * 64)
+        self.assertEqual(self.saved()['binding_evidence'], 'server_finished_archive')
+        self.assertEqual(json.loads(self.saved()['payload']), original)
+        self.assertNotEqual(original['client_replay_sha256'], self.saved()['server_sha256'])
+
+    def test_different_replay_bytes_require_complete_unique_trusted_finished_server_metadata(self):
+        for index, options in enumerate(({'session': 'other-session'}, {'build': 1},
+                                        {'finished': False}, {'origin': 'local_upload'},
+                                        {'players': [{'id': '456', 'alliance': 0}]},
+                                        {'players': [{'id': '123', 'alliance': 1}]})):
+            with self.subTest(options=options):
+                archive = self.base / ('mismatch-' + str(index) + '.sqlite3')
+                native_archive(archive, **options)
+                store = ReceiverStore(self.base / ('mismatch-inbox-' + str(index) + '.sqlite3'),
+                                      archive_index=ArchiveIndex(archive))
+                report = replay_payload(sha='f' * 64)
+                self.assertEqual(store.submit(report)['status'], 'pending_match')
+        archive = self.base / 'ambiguous-replay.sqlite3'
+        native_archive(archive)
+        native_archive(archive, sha='e' * 64)
+        store = ReceiverStore(self.base / 'ambiguous-inbox.sqlite3', archive_index=ArchiveIndex(archive))
+        report = replay_payload(sha='f' * 64)
         self.assertEqual(store.submit(report)['status'], 'pending_match')
-        self.assertIsNone(self.saved()['server_sha256'])
+        self.assertEqual(store.report(report['submission_id'])['pending_reason'], 'server_session_archive_ambiguous')
+
+    def test_composite_replay_match_uses_server_session_in_other_archive_and_preserves_ambiguity(self):
+        first, second = self.base / 'first.sqlite3', self.base / 'second.sqlite3'
+        native_archive(first, session='unrelated')
+        native_archive(second)
+        index = CompositeArchiveIndex((first, second))
+        report = replay_payload(sha='f' * 64)
+        self.assertEqual(index(report)['server_sha256'], 'c' * 64)
+        native_archive(first, sha='e' * 64)
+        self.assertEqual(index(report)['pending_reason'], 'archive_match_ambiguous')
+
+    def test_previously_pending_different_byte_replay_reconciles_without_resubmission(self):
+        archive = self.base / 'late-different-replay.sqlite3'
+        native_archive(archive, session='unrelated-session')
+        store = ReceiverStore(self.path, archive_index=ArchiveIndex(archive))
+        report = replay_payload(sha='f' * 64)
+        self.assertEqual(store.submit(report)['status'], 'pending_match')
+        native_archive(archive, sha='e' * 64)
+        self.assertEqual(store.reconcile(), {'checked': 1, 'accepted': 1})
+        stored = store.report(report['submission_id'])
+        self.assertEqual(stored['server_sha256'], 'e' * 64)
+        self.assertEqual(stored['binding_evidence'], 'server_finished_archive')
+        self.assertEqual(stored['report'], report)
+        self.assertEqual(store.status()['submissions']['total'], 1)
+
+    def test_native_replay_session_is_honest_and_does_not_claim_live_network_evidence(self):
+        archive = self.base / 'native-replay.sqlite3'
+        native_archive(archive)
+        store = ReceiverStore(self.path, archive_index=ArchiveIndex(archive))
+        report = native_live_payload()
+        report['map'] = 'fixture-map'
+        report['client_context_evidence'].update(association='native_replay_session', native_source_kind='replay')
+        self.assertEqual(store.submit(report)['status'], 'accepted')
+        self.assertEqual(self.saved()['server_state_verified'], 0)
+        self.assertNotIn('client_replay_sha256', report)
+        self.assertEqual(json.loads(self.saved()['payload']), report)
+        for key in ('native_game_ended', 'observed_running', 'report_observed_after_end', 'context_epoch'):
+            invalid = copy.deepcopy(report)
+            del invalid['client_context_evidence'][key]
+            with self.subTest(missing=key), self.assertRaises(ReceiverError):
+                store.submit(invalid)
+        invalid = copy.deepcopy(report)
+        del invalid['map']
+        with self.assertRaises(ReceiverError):
+            store.submit(invalid)
 
     def test_selected_local_replay_requires_explicit_full_file_and_roster_checks(self):
         evidence = {'association': 'user_selected_local_replay',

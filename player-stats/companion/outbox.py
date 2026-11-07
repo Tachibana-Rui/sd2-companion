@@ -12,7 +12,7 @@ import sqlite3
 import time
 import uuid
 
-from .upload import ACCEPTED_STATUSES, MAX_RESPONSE_BYTES, payload_bytes
+from .upload import ACCEPTED_STATUSES, MAX_RESPONSE_BYTES, payload_bytes, safe_receipt
 
 
 _ERROR_CODE = re.compile(r"[a-z][a-z0-9_]{0,79}\Z")
@@ -28,6 +28,14 @@ def _error_code(value):
     if not isinstance(value, str) or not _ERROR_CODE.fullmatch(value):
         raise ValueError("invalid_error_code")
     return value
+
+
+def _capture_fingerprint(payload):
+    from .local_replay_library import report_fingerprint
+    try:
+        return report_fingerprint(payload)
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 class Outbox:
@@ -51,6 +59,32 @@ class Outbox:
                 receipt TEXT
             )""")
             db.execute("CREATE INDEX IF NOT EXISTS companion_outbox_due ON companion_outbox(state, next_attempt_at)")
+            db.execute("""CREATE TABLE IF NOT EXISTS companion_delivery_state (
+                submission_id TEXT PRIMARY KEY, report_fingerprint TEXT,
+                server_status TEXT, pending_reason TEXT,
+                next_receipt_check_at REAL NOT NULL DEFAULT 0)""")
+            db.execute("""CREATE TABLE IF NOT EXISTS companion_deleted_reports (
+                fingerprint TEXT PRIMARY KEY, deleted_at REAL NOT NULL)""")
+            # Add metadata alongside the immutable, backwards compatible queue.
+            for row in db.execute("""SELECT o.submission_id,o.payload,o.receipt,o.state
+                FROM companion_outbox o LEFT JOIN companion_delivery_state d
+                ON d.submission_id=o.submission_id WHERE d.submission_id IS NULL"""):
+                try:
+                    capture = _capture_fingerprint(json.loads(row["payload"]))
+                except (ValueError, TypeError):
+                    capture = None
+                try:
+                    receipt = json.loads(row["receipt"]) if row["receipt"] else {}
+                    if not isinstance(receipt, dict):
+                        receipt = {}
+                except (ValueError, TypeError):
+                    receipt = {}
+                state = receipt.get("status") if receipt.get("status") in ("accepted", "pending_match") else None
+                if row["state"] == "sent" and state is None:
+                    state = "received"
+                db.execute("""INSERT OR IGNORE INTO companion_delivery_state
+                    (submission_id,report_fingerprint,server_status) VALUES(?,?,?)""",
+                           (row["submission_id"], capture, state))
             db.execute("INSERT OR IGNORE INTO companion_meta(key, value) VALUES('installation_id', ?)",
                        (str(uuid.uuid4()),))
             self.installation_id = db.execute("SELECT value FROM companion_meta WHERE key='installation_id'").fetchone()[0]
@@ -75,8 +109,15 @@ class Outbox:
         submission_id = payload["submission_id"]
         fingerprint = hashlib.sha256(encoded).hexdigest()
         now = _timestamp(self._clock())
+        capture = _capture_fingerprint(payload)
+        if capture:
+            from .local_deletion import deleted_fingerprints
+            if capture in deleted_fingerprints(self.path.parent):
+                return False
         with self._connection() as db:
             db.execute("BEGIN IMMEDIATE")
+            if capture and db.execute("SELECT 1 FROM companion_deleted_reports WHERE fingerprint=?", (capture,)).fetchone():
+                return False
             previous = db.execute("SELECT payload_sha256 FROM companion_outbox WHERE submission_id=?", (submission_id,)).fetchone()
             if previous is not None:
                 if previous["payload_sha256"] != fingerprint:
@@ -86,6 +127,8 @@ class Outbox:
                 (submission_id,payload,payload_sha256,state,created_at,updated_at,next_attempt_at)
                 VALUES(?,?,?,'pending',?,?,?)""",
                        (submission_id, encoded.decode("utf-8"), fingerprint, now, now, now))
+            db.execute("INSERT OR IGNORE INTO companion_delivery_state(submission_id,report_fingerprint) VALUES(?,?)",
+                       (submission_id, capture))
         return True
 
     def due(self, now=None, limit=10):
@@ -111,20 +154,92 @@ class Outbox:
                            "next_attempt_at": row["next_attempt_at"]})
         return result
 
+    def is_pending(self, submission_id):
+        with self._connection() as db:
+            return db.execute("""SELECT 1 FROM companion_outbox o
+                LEFT JOIN companion_delivery_state d ON d.submission_id=o.submission_id
+                WHERE o.submission_id=? AND o.state='pending' AND NOT EXISTS
+                    (SELECT 1 FROM companion_deleted_reports x WHERE x.fingerprint=d.report_fingerprint)""",
+                (submission_id,)).fetchone() is not None
+
     def mark_sent(self, job_id, receipt):
-        if (not isinstance(receipt, dict) or receipt.get("submission_id") != job_id
-                or not isinstance(receipt.get("status"), str)
-                or receipt["status"] not in ACCEPTED_STATUSES):
-            raise ValueError("invalid_receipt")
-        # Retain acknowledgement fields only, never arbitrary endpoint messages.
-        encoded = json.dumps({"submission_id": job_id, "status": receipt["status"]}, separators=(",", ":"))
+        receipt = safe_receipt(receipt, job_id)
+        encoded = json.dumps(receipt, separators=(",", ":"))
         if len(encoded.encode("utf-8")) > MAX_RESPONSE_BYTES:
             raise ValueError("invalid_receipt")
         with self._connection() as db:
             cursor = db.execute("""UPDATE companion_outbox SET state='sent',receipt=?,last_error=NULL,
                 attempts=attempts+1,updated_at=? WHERE submission_id=? AND state='pending'""",
                                 (encoded, _timestamp(self._clock()), job_id))
+            changed = cursor.rowcount == 1
+            if changed:
+                state = receipt["status"] if receipt["status"] in ("accepted", "pending_match") else "received"
+                db.execute("""UPDATE companion_delivery_state SET server_status=?,pending_reason=?,
+                    next_receipt_check_at=0 WHERE submission_id=?""",
+                           (state, receipt.get("pending_reason"), job_id))
+            return changed
+
+    def cancel_report(self, fingerprint):
+        """Cancel this local capture durably; already delivered reports stay remote."""
+        if not isinstance(fingerprint, str) or not re.fullmatch(r"[0-9a-f]{64}", fingerprint):
+            raise ValueError("invalid_report_fingerprint")
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("INSERT OR IGNORE INTO companion_deleted_reports VALUES(?,?)",
+                       (fingerprint, _timestamp(self._clock())))
+            removed = db.execute("""DELETE FROM companion_outbox WHERE state IN ('pending','rejected')
+                AND submission_id IN (SELECT submission_id FROM companion_delivery_state WHERE report_fingerprint=?)""",
+                                 (fingerprint,))
+            return removed.rowcount
+
+    def receipts_due(self, *, now=None, limit=5):
+        now = _timestamp(self._clock() if now is None else now)
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("invalid_outbox_limit")
+        with self._connection() as db:
+            rows = db.execute("""SELECT d.submission_id FROM companion_delivery_state d
+                JOIN companion_outbox o ON o.submission_id=d.submission_id
+                WHERE o.state='sent' AND d.server_status IN ('pending_match','received')
+                AND d.next_receipt_check_at<=? AND NOT EXISTS
+                    (SELECT 1 FROM companion_deleted_reports x WHERE x.fingerprint=d.report_fingerprint)
+                ORDER BY d.next_receipt_check_at,o.created_at LIMIT ?""", (now, limit)).fetchall()
+            ids = [row[0] for row in rows]
+            db.executemany("UPDATE companion_delivery_state SET next_receipt_check_at=? WHERE submission_id=?",
+                           ((now + 60, identifier) for identifier in ids))
+            return ids
+
+    def update_receipt(self, job_id, receipt):
+        receipt = safe_receipt(receipt, job_id)
+        if receipt["status"] not in ("accepted", "pending_match"):
+            raise ValueError("invalid_receipt")
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            previous = db.execute("SELECT server_status FROM companion_delivery_state WHERE submission_id=?", (job_id,)).fetchone()
+            if previous is not None and previous[0] == "accepted" and receipt["status"] != "accepted":
+                return False
+            cursor = db.execute("UPDATE companion_outbox SET receipt=?,updated_at=? WHERE submission_id=? AND state='sent'",
+                (json.dumps(receipt, separators=(",", ":")), _timestamp(self._clock()), job_id))
+            if cursor.rowcount:
+                # Once verified, transient old responses cannot regress a match.
+                db.execute("""UPDATE companion_delivery_state SET server_status=?,pending_reason=?
+                    WHERE submission_id=? AND COALESCE(server_status,'')!='accepted'""",
+                           (receipt["status"], receipt.get("pending_reason"), job_id))
             return cursor.rowcount == 1
+
+    def report_statuses(self):
+        result = {}
+        priority = {"received": 0, "rejected": 1, "queued": 2, "pending_match": 3, "accepted": 4}
+        with self._connection() as db:
+            for row in db.execute("""SELECT d.report_fingerprint,d.server_status,d.pending_reason,o.state
+                FROM companion_delivery_state d JOIN companion_outbox o ON o.submission_id=d.submission_id
+                WHERE d.report_fingerprint IS NOT NULL AND NOT EXISTS
+                    (SELECT 1 FROM companion_deleted_reports x WHERE x.fingerprint=d.report_fingerprint)"""):
+                state = ("queued" if row["state"] == "pending" else "rejected" if row["state"] == "rejected"
+                         else row["server_status"] or "received")
+                old = result.get(row["report_fingerprint"], {}).get("server_status", "received")
+                if row["report_fingerprint"] not in result or priority.get(state, 0) >= priority.get(old, 0):
+                    result[row["report_fingerprint"]] = {"server_status": state, "pending_reason": row["pending_reason"]}
+        return result
 
     def mark_retry(self, job_id, error_code, *, now=None, retry_after=None):
         error_code = _error_code(error_code)
@@ -175,9 +290,13 @@ class Outbox:
         result = {"installation_id": self.installation_id, "pending": 0, "sent": 0, "rejected": 0,
                   "due": 0, "next_attempt_at": None}
         with self._connection() as db:
-            for row in db.execute("SELECT state,COUNT(*) AS count FROM companion_outbox GROUP BY state"):
+            eligible = """FROM companion_outbox o LEFT JOIN companion_delivery_state d ON d.submission_id=o.submission_id
+                WHERE NOT EXISTS (SELECT 1 FROM companion_deleted_reports x WHERE x.fingerprint=d.report_fingerprint)"""
+            for row in db.execute("SELECT o.state,COUNT(*) AS count " + eligible + " GROUP BY o.state"):
                 result[row["state"]] = row["count"]
             result["due"] = db.execute("SELECT COUNT(*) FROM companion_outbox WHERE state='pending' AND next_attempt_at<=?", (now,)).fetchone()[0]
             result["next_attempt_at"] = db.execute("SELECT MIN(next_attempt_at) FROM companion_outbox WHERE state='pending'").fetchone()[0]
+            for column, state in (("matched", "accepted"), ("server_pending", "pending_match")):
+                result[column] = db.execute("SELECT COUNT(*) " + eligible + " AND o.state='sent' AND d.server_status=?", (state,)).fetchone()[0]
         result["total"] = result["pending"] + result["sent"] + result["rejected"]
         return result

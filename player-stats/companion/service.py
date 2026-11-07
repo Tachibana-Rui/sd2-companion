@@ -139,6 +139,15 @@ class CompanionService:
             return 0
         count = 0
         for job in self.outbox.due(now=now, limit=limit):
+            # A UI deletion can happen after this worker fetched its jobs.
+            if not self.outbox.is_pending(job["id"]):
+                continue
+            from .local_deletion import deleted_fingerprints
+            from .outbox import _capture_fingerprint
+            fingerprint = _capture_fingerprint(job["payload"])
+            if fingerprint and fingerprint in deleted_fingerprints(self.outbox.path.parent):
+                self.outbox.cancel_report(fingerprint)
+                continue
             try:
                 receipt = self.uploader.send(job["payload"])
             except UploadError as exc:
@@ -171,6 +180,19 @@ class DeliveryWorker:
         while not self.stop_event.is_set():
             try:
                 self.service.flush(limit=1)
+                uploader, outbox = getattr(self.service, "uploader", None), getattr(self.service, "outbox", None)
+                query = getattr(uploader, "query_receipt", None)
+                if callable(query):
+                    for identifier in outbox.receipts_due(limit=1):
+                        if self.stop_event.is_set():
+                            break
+                        try:
+                            receipt = query(identifier)
+                        except UploadError:
+                            continue  # Keep the durable acknowledgement and retry later.
+                        outbox.update_receipt(identifier, receipt)
+                        self.service.emit({"event": "server_receipt_updated", "receipt_status": receipt["status"],
+                                           **outbox.status()})
             except (OSError, ValueError, sqlite3.Error):
                 # The row remains durable; retry rather than killing capture.
                 self.service.emit({"event": "delivery_worker_retry"})

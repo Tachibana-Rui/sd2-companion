@@ -187,11 +187,20 @@ class ReplayAssociationTests(unittest.TestCase):
             self.assertEqual(row[:4], ("fixture-room", "map-one", sha, "exact_replay_sha256_archive"))
             self.assertEqual(json.loads(row[4]), payload)
 
-    def test_http_receiver_keeps_wrong_sha_or_archive_metadata_pending(self):
+    def test_http_receiver_matches_different_bytes_only_through_verified_server_session(self):
+        payload = self.enqueue(session_id="session-one")
+        with self.http_archive(sha="f" * 64) as (store, uploader, sha):
+            self.assertEqual(uploader.send(payload)["status"], "accepted")
+            stored = store.report(payload["submission_id"])
+            self.assertEqual(stored["server_sha256"], sha)
+            self.assertEqual(stored["binding_evidence"], "server_finished_archive")
+            self.assertEqual(stored["report"], payload)
+            self.assertNotEqual(payload["client_replay_sha256"], sha)
+
+    def test_http_receiver_keeps_wrong_archive_metadata_pending(self):
         payload = self.enqueue(session_id="session-one")
         job = self.outbox.due()[0]
-        cases = (({"sha": "f" * 64}, "replay_sha256_not_analyzed"),
-                 ({"session": "different-session"}, "archive_replay_metadata_mismatch"),
+        cases = (({"session": "different-session"}, "archive_replay_metadata_mismatch"),
                  ({"map_id": "different-map"}, "archive_replay_metadata_mismatch"))
         for options, reason in cases:
             with self.subTest(options=options), self.http_archive(**options) as (store, uploader, _):

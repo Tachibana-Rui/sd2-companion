@@ -39,10 +39,11 @@ _TEXT = {
                 "uploads matches played on the [ASIA-JP] server for analysis.",
                 "对局结束后，本程序从游戏内存读取任务报告-游戏时间表，并把在 [ASIA-JP] 服务器上进行的对局"
                 "自动上传到服务器做数据分析。"),
-    "intro_3": ("You can also play a local replay in game to analyse its kills and losses locally. "
-                "Use File → Link local replay to server match to submit that analysis for server matching.",
-                "也可以在游戏里播放本地录像，在本机分析击杀数据。需要关联服务器对局时，"
-                "请选择“文件 → 将本地录像关联到服务器对局”。"),
+    "intro_3": ("If the companion was not running during a match, start it first, play the entire local replay "
+                "in game, and leave the debrief open afterward. The companion reads the timeline and matches "
+                "it to the server record automatically. Local analysis also works offline.",
+                "若对局时忘开助手，请先运行本程序，再在游戏里完整播放本地录像；结束后停留在任务报告界面，"
+                "软件自动读取时间表并匹配服务器对局。本地分析也可离线使用。"),
     "menu_file": ("File", "文件"),
     "menu_open_reports": ("Open report folder", "打开报告目录"),
     "menu_open_replays": ("Open SD2 local replay folder", "打开 SD2 本地录像目录"),
@@ -53,6 +54,20 @@ _TEXT = {
     "online_restart": ("Restart the companion to apply this change.", "重新启动助手后此更改生效。"),
     "menu_link_replay": ("Add local replay to selected analysis…", "为所选分析补充本地录像…"),
     "menu_link_server": ("Link local replay to server match…", "将本地录像关联到服务器对局…"),
+    "server_link_select": ("Select a captured analysis first. If you did not run the companion during the match, "
+                           "keep it running while you play the entire local replay in game, then leave the debrief open. "
+                           "Its timeline will be read and matched automatically.",
+                           "请先选中已采集的分析记录。若对局时忘开助手，请保持助手运行，在游戏里完整播放本地录像，"
+                           "结束后停留在任务报告界面，软件会自动读取时间表并匹配服务器对局。"),
+    "menu_delete_record": ("Delete selected local record…", "删除所选本机记录…"),
+    "delete_select": ("Select the local record to delete first.", "请先选中需要删除的本机记录。"),
+    "delete_confirm": ("Delete this record from this computer and cancel its pending uploads? "
+                       "A recovery copy is kept. Game replay files and records already stored on the website are kept.",
+                       "是否删除所选本机记录并取消其待发送任务？会保留回收副本。游戏录像文件与网站已收录的数据会保留。"),
+    "delete_working": ("Deleting the selected local record…", "正在删除所选本机记录…"),
+    "delete_done": ("Local record deleted.", "本机记录已删除。"),
+    "delete_failed": ("The local record could not be deleted completely. Try again.",
+                      "本机记录未能完整删除，请重试。"),
     "menu_settings": ("Settings", "设置"),
     "menu_exit": ("Exit", "退出"),
     "menu_help": ("Help", "帮助"),
@@ -78,17 +93,24 @@ _TEXT = {
     "settings_upload_failed": ("Upload settings could not be saved. Use a valid HTTPS address and check Windows Credential Manager access.",
                                "上传设置保存失败。请检查 HTTPS 地址及 Windows 凭据管理器访问权限。"),
     "counts": ("Analyzed: {analyzed}　Local only: {unlinked}　Queued: {queued}　"
-               "Received by server: {received}　Upload failed: {failed}",
+               "Received by server: {received}　Matched: {matched}　Server pending: {server_pending}　Upload failed: {failed}",
                "已分析：{analyzed}　仅本地：{unlinked}　待传：{queued}　"
-               "服务器已收件：{received}　上传失败：{failed}"),
-    "counts_pending": ("Analyzed: —　Local only: —　Queued: —　Received by server: —　Upload failed: —",
-                       "已分析：—　仅本地：—　待传：—　服务器已收件：—　上传失败：—"),
+               "服务器已收件：{received}　已匹配：{matched}　服务器待匹配：{server_pending}　上传失败：{failed}"),
+    "counts_pending": ("Analyzed: —　Local only: —　Queued: —　Received by server: —　Matched: —　Server pending: —　Upload failed: —",
+                       "已分析：—　仅本地：—　待传：—　服务器已收件：—　已匹配：—　服务器待匹配：—　上传失败：—"),
     "filter_label": ("Show:", "显示："),
     "filter_all": ("All", "全部"),
     "filter_local": ("Local replay", "本地录像"),
     "filter_online": ("Online match", "在线对局"),
     "filter_hint": ("Double-click a row for the local analysis", "双击一行查看该局本地分析"),
     "column_kind": ("Category", "类别"),
+    "column_server_status": ("Server status", "服务器状态"),
+    "record_local_only": ("Local only", "仅本地"),
+    "record_queued": ("Waiting for upload", "待上传"),
+    "record_rejected": ("Upload failed", "上传失败"),
+    "record_received": ("Received; checking", "已收件，待确认"),
+    "record_pending_match": ("Server match pending", "服务器待匹配"),
+    "record_accepted": ("Matched", "已匹配"),
     "column_duration": ("Duration", "时长"),
     "column_analyzed": ("Analyzed", "分析时间"),
     "column_map": ("Map", "地图"),
@@ -165,6 +187,11 @@ def _status_text(model, language):
     if language != "en":
         return model.status
     code = model.code if isinstance(model.code, str) else ""
+    if code in ("upload_acknowledged", "server_receipt_updated"):
+        return {"accepted": "The server matched this report to its recorded match.",
+                "pending_match": "Received by server; waiting for a matching recorded match.",
+                "duplicate": "Already received; checking the server's current match status."}.get(
+                    getattr(model, "receipt_status", ""), "Checking server match status…")
     return _STATUS_EN.get(code, "Working…" if not code else "Capture status: " + code)
 
 
@@ -345,7 +372,7 @@ def _safe_event(value):
                 and math.isfinite(stamp) and 0 < stamp <= 253402300799):
             result["last_success"] = stamp
     for key in ("total", "pending", "sent", "rejected", "rows", "exit_code",
-                "analyzed", "unbound", "bound", "inventory_errors",
+                "analyzed", "unbound", "bound", "inventory_errors", "matched", "server_pending",
                 "official_score_players", "total_players", "resolved_actors", "total_actors",
                 "scan_mib", "scan_total_mib", "scan_rounds_completed"):
         number = value.get(key)
@@ -473,6 +500,20 @@ class LocalReportInventory:
     def __init__(self, directory):
         self.directory = Path(directory)
         self.cache = {}
+        self.delivery = None
+
+    def _deleted(self):
+        from .local_deletion import deleted_fingerprints
+        return deleted_fingerprints(self.directory)
+
+    def _delivery_statuses(self):
+        from .outbox import Outbox
+        try:
+            if self.delivery is None and (self.directory / "outbox.sqlite3").is_file():
+                self.delivery = Outbox(self.directory / "outbox.sqlite3")
+            return self.delivery.report_statuses() if self.delivery else {}
+        except (OSError, ValueError, sqlite3.Error):
+            return {}
 
     def _read(self, path, kind):
         before = path.stat()
@@ -500,7 +541,11 @@ class LocalReportInventory:
                 raise ValueError("invalid_local_export")
             # An export that carries a replay digest came from a local replay; the
             # rest are live server matches captured through the game's session.
-            source = "replay" if _replay_digest(report) else "live"
+            evidence = report.get("client_context_evidence") or {}
+            replay_source = (evidence.get("native_source_kind") == "replay"
+                             or evidence.get("association") in ("native_replay_session", "user_selected_local_replay",
+                                 "observed_game_file_read", "observed_game_file_write"))
+            source = "replay" if replay_source or _replay_digest(report) else "live"
         else:
             if value.get("schema") != _LOCAL_REPORT_SCHEMA:
                 self.cache[path] = signature, None
@@ -511,7 +556,9 @@ class LocalReportInventory:
             generation, players = report.get("report_generation"), report.get("native_players")
             submission = None
             metadata = value
-            source = "live" if kind == "live" else "replay"
+            source = ("replay" if metadata.get("source_kind") == "replay"
+                      or metadata.get("session_origin") == "native_replay_context"
+                      else "live" if kind == "live" or metadata.get("source_kind") == "network_live" else "unverified")
         build = report.get("game_build")
         rows = report.get("rows")
         if (type(build) is not int or type(generation) is not int
@@ -534,6 +581,7 @@ class LocalReportInventory:
 
     def poll(self):
         local, exported, submissions = Counter(), Counter(), set()
+        deleted = self._deleted()
         seen, errors = set(), 0
         for name, kind in _SOURCES:
             try:
@@ -545,7 +593,7 @@ class LocalReportInventory:
                 seen.add(path)
                 try:
                     item = self._read(path, kind)
-                    if item is None:
+                    if item is None or item["fingerprint"] in deleted:
                         continue
                     fingerprint, submission = item["fingerprint"], item["submission"]
                 except (OSError, ValueError, TypeError, UnicodeError, RecursionError):
@@ -563,7 +611,7 @@ class LocalReportInventory:
                 "unbound": sum((local - exported).values()), "bound": sum(exported.values()),
                 "inventory_errors": errors}
         revisions = []
-        for name in ("local-replay-links", "replay-evidence"):
+        for name in ("local-replay-links", "replay-evidence", "deleted-reports", "outbox.sqlite3", "outbox.sqlite3-wal"):
             try:
                 revisions.append((self.directory / name).stat().st_mtime_ns)
             except OSError:
@@ -581,6 +629,8 @@ class LocalReportInventory:
         the list is local evidence only.
         """
         reports = {}
+        deleted = self._deleted()
+        delivery = self._delivery_statuses()
         for name, kind in _SOURCES:
             try:
                 paths = list((self.directory / name).rglob("*.json"))
@@ -589,7 +639,7 @@ class LocalReportInventory:
             for path in paths:
                 try:
                     item = self._read(path, kind)
-                    if item is None:
+                    if item is None or item["fingerprint"] in deleted:
                         continue
                     stamp = path.stat().st_mtime
                 except (OSError, ValueError, TypeError, UnicodeError, RecursionError):
@@ -628,12 +678,14 @@ class LocalReportInventory:
             if entry["replay"] and not entry["map_named"]:
                 entry["map"] = _map_label({}, {}, entry["replay"], self.directory) or entry["map"]
             kinds = entry.pop("kinds")
-            entry.pop("sources", None)
-            # Only a record positively bound to a local .rpl3 file is a local replay.
-            # A capture without a replay digest is a server match: it may come from a
-            # live session, or from spectating someone else's match on the server.
-            entry["kind"] = "local" if entry.get("replay") else "online"
+            sources = entry.pop("sources", set())
+            # Playback identity comes from the native source, independently of
+            # whether a file hash was found. A live match may acquire the same
+            # .rpl3 later for production P without becoming a replay capture.
+            entry["kind"] = ("online" if "live" in sources else "local" if "replay" in sources
+                             or entry.get("replay") else "online")
             entry["linked"] = "export" in kinds
+            entry.update(delivery.get(entry["fingerprint"], {"server_status": "local_only", "pending_reason": None}))
             rows.append(entry)
         rows.sort(key=lambda item: (item["ended_at"], item["fingerprint"]), reverse=True)
         return rows
@@ -648,6 +700,8 @@ class StatusModel:
     session_id: str = ""
     saved: int = 0
     sent: int = 0
+    matched: int = 0
+    server_pending: int = 0
     pending: int = 0
     rejected: int = 0
     queued: int = 0
@@ -723,7 +777,7 @@ class StatusModel:
             self.status = "采集出现错误，请检查设置后重新打开程序。"
         if code == "desktop_worker_finished":
             self.status = "采集已停止。" if event.get("exit_code") == 0 else "采集未能继续，请查看上方诊断状态后重新打开程序。"
-        if event["event"] == "upload_acknowledged" and "receipt_status" in event:
+        if event["event"] in ("upload_acknowledged", "server_receipt_updated") and "receipt_status" in event:
             self.receipt_status = event["receipt_status"]
             self.status = {
                 "accepted": "接收端已收件，并已匹配对应的服务器对局记录。",
@@ -745,7 +799,8 @@ class StatusModel:
             self.queued = event["total"]
             if not self.inventory_ready:
                 self.saved = event["total"]
-        for key, attribute in (("sent", "sent"), ("pending", "pending"), ("rejected", "rejected"), ("rows", "rows")):
+        for key, attribute in (("sent", "sent"), ("pending", "pending"), ("rejected", "rejected"), ("rows", "rows"),
+                               ("matched", "matched"), ("server_pending", "server_pending")):
             if key in event:
                 setattr(self, attribute, event[key])
 
@@ -902,15 +957,15 @@ class _SortableTable:
 class DesktopApp:
     """Standard desktop shell: menu bar, header note, counters, results list.
 
-    Summary text lives in the header, the five counters sit on one line, the
+    Summary text and delivery/matching counters live in the header, the
     analyzed captures are one list, and every diagnostic detail is one menu
     click away. Nothing in this class opens a network connection; the worker
     thread owns capture and upload and never calls Tk directly.
     """
 
-    COLUMNS = (("kind", "column_kind", 110, "w"), ("duration", "column_duration", 90, "w"),
-               ("analyzed", "column_analyzed", 150, "w"), ("map", "column_map", 210, "w"),
-               ("players", "column_players", 420, "w"))
+    COLUMNS = (("kind", "column_kind", 100, "w"), ("server_status", "column_server_status", 150, "w"),
+               ("duration", "column_duration", 80, "w"), ("analyzed", "column_analyzed", 145, "w"),
+               ("map", "column_map", 170, "w"), ("players", "column_players", 330, "w"))
     # Defaults keep partially built instances (and tests) usable without __init__.
     language = "en"
     sort_column, sort_reverse = "analyzed", True
@@ -1005,6 +1060,7 @@ class DesktopApp:
         self._add_command(file_menu, self._t("menu_open_replays"), self.open_replays_directory)
         self._add_command(file_menu, self._t("menu_link_server"), self.link_selected_server_match)
         self._add_command(file_menu, self._t("menu_link_replay"), self.link_selected_replay)
+        self._add_command(file_menu, self._t("menu_delete_record"), self.delete_selected_entry)
         self._add_command(file_menu, self._t("menu_settings"), self.open_settings)
         file_menu.add_separator()
         self._add_command(file_menu, self._t("menu_exit"), self.on_close)
@@ -1035,8 +1091,9 @@ class DesktopApp:
             label = ttk.Label(frame, justify="left", wraplength=920, text=self._t(key))
             label.pack(anchor="w", pady=(0, 6))
             self.intro_labels.append(label)
-        ttk.Label(frame, textvariable=self.counts_var,
-                  font=("Microsoft YaHei UI", 10)).pack(anchor="w", pady=(8, 0))
+        self.counts_label = ttk.Label(frame, textvariable=self.counts_var, justify="left", wraplength=920,
+                                     font=("Microsoft YaHei UI", 10))
+        self.counts_label.pack(anchor="w", pady=(8, 0))
         self.header_frame = frame
         frame.bind("<Configure>", self._fit_header)
 
@@ -1045,6 +1102,8 @@ class DesktopApp:
         width = max(240, int(event.width) - 44)
         for label in getattr(self, "intro_labels", ()):
             label.configure(wraplength=width)
+        if getattr(self, "counts_label", None) is not None:
+            self.counts_label.configure(wraplength=width)
 
     def _build_status(self):
         frame = self.ttk.Frame(self.root, padding=(20, 0, 20, 14))
@@ -1080,10 +1139,16 @@ class DesktopApp:
         self.tree.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
         self.tree.bind("<Double-1>", lambda _event: self.open_selected_entry())
+        self.tree.bind("<Delete>", self.delete_selected_entry)
         self.empty_note = ttk.Label(frame, text=self._t("empty"), foreground="#666666")
         self.empty_note.pack(anchor="w", pady=(6, 0))
 
     # -- results list -----------------------------------------------------
+    def _entry_server_status(self, entry):
+        status = entry.get("server_status")
+        key = "record_" + status if status in ("queued", "rejected", "received", "pending_match", "accepted") else "record_local_only"
+        return self._t(key)
+
     def _refresh_entries(self):
         """Rebuild the list from the inventory; report contents stay untouched."""
         selected_fingerprint = None
@@ -1110,6 +1175,7 @@ class DesktopApp:
             for index, entry in enumerate(rows):
                 self.tree.insert("", "end", iid=str(index), values=(
                     self._t("kind_local") if entry.get("kind") == "local" else self._t("kind_online"),
+                    self._entry_server_status(entry),
                     _duration_text(entry.get("duration")), _stamp(entry.get("analyzed_at")),
                     entry.get("map") or "—", _names_text(entry.get("names"))))
                 if selected_fingerprint and entry.get("fingerprint") == selected_fingerprint:
@@ -1130,7 +1196,9 @@ class DesktopApp:
                      "duration": lambda item: item.get("duration"),
                      "analyzed": lambda item: item.get("analyzed_at") or None,
                      "map": lambda item: (item.get("map") or "").casefold() or None,
-                     "players": lambda item: ", ".join(item.get("names") or ()).casefold() or None}
+                     "players": lambda item: ", ".join(item.get("names") or ()).casefold() or None,
+                     "server_status": lambda item: {"local_only": 0, "queued": 1, "rejected": 2,
+                         "received": 3, "pending_match": 4, "accepted": 5}.get(item.get("server_status"))}
         accessor = accessors.get(key)
         if accessor is None:
             return list(rows)
@@ -1165,17 +1233,21 @@ class DesktopApp:
              "3. 在 [ASIA-JP] 服务器上进行的对局会自动上传服务器做数据分析；"),
             ("   other matches stay local and show as local only." if english else
              "   其他来源的对局只保存在本机，显示为仅本地。"),
-            ("4. You can also play a local replay in game: after the debrief the companion analyses its kills and losses locally." if english else
-             "4. 也可以在游戏里播放本地录像：任务报告结束后，程序在本机分析击杀数据。"),
+            ("4. If you forgot to run the companion during the match, start it first, play the entire local replay in game, "
+             "then leave the debrief open. The timeline is read and matched to the server record automatically." if english else
+             "4. 若对局时忘开助手，请先启动助手，在游戏里完整播放本地录像，结束后停留在任务报告界面。"
+             "软件会自动读取时间表并匹配服务器对局。"),
             ("5. Double-click any row to open that match's local analysis." if english else
              "5. 列表里的每一行都可以双击，查看该局的本地分析结果。"),
             "",
-            ("6. To match a local replay with a server record, select the analysis and use File → Link local replay to server match." if english else
-             "6. 如需关联服务器对局，先选中该局分析，再选择“文件 → 将本地录像关联到服务器对局”。"),
+            ("6. Local analysis also works offline. File → Link local replay to server match can resubmit an older "
+             "captured timeline; selecting a replay file alone cannot recover an uncaptured timeline." if english else
+             "6. 本地分析也可离线使用。“文件 → 将本地录像关联到服务器对局”可重新提交已采集的旧时间表；"
+             "仅选择录像文件不能补出尚未采集的时间表。"),
             ("\"Local only\" means no upload has been prepared for that analysis; it does not mean a replay file is missing." if english else
              "「仅本地」表示该局分析尚未准备上传，不表示录像文件缺失。"),
-            ("\"received by server\" does not mean the server has accepted it." if english else
-             "「服务器已收件」不代表服务器已经验收。"),
+            ("\"Received by server\" only confirms delivery. Check Server status for \"Server match pending\" or \"Matched\"." if english else
+             "「服务器已收件」只表示送达；请在“服务器状态”列查看“服务器待匹配”或“已匹配”。"),
         )))
 
     def show_diagnostics(self):
@@ -1293,11 +1365,57 @@ class DesktopApp:
             self._start_update_check()
 
     # -- local analysis ---------------------------------------------------
+    def delete_selected_entry(self, _event=None):
+        """Remove one captured analysis locally, with explicit user intent."""
+        selection = self.tree.selection()
+        if not selection:
+            _message(self._t("delete_select"))
+            return "break"
+        try:
+            entry = self.visible_entries[int(selection[0])]
+            fingerprint = entry["fingerprint"]
+        except (ValueError, IndexError, KeyError):
+            return "break"
+        from tkinter import messagebox
+        if not messagebox.askyesno(self._t("menu_delete_record"), self._t("delete_confirm"), parent=self.root):
+            return "break"
+        results = queue.Queue(maxsize=1)
+
+        def work():
+            try:
+                from .local_deletion import delete_record
+                from .outbox import Outbox
+                delete_record(self.config.data_directory, fingerprint,
+                              outbox=Outbox(self.config.data_directory / "outbox.sqlite3"))
+                results.put(True)
+            except (OSError, ValueError, KeyError, TypeError, RuntimeError, ImportError, sqlite3.Error):
+                results.put(False)
+
+        def finish():
+            if self.destroyed or self.closing:
+                return
+            try:
+                success = results.get_nowait()
+            except queue.Empty:
+                self.root.after(150, finish)
+                return
+            inventory = getattr(getattr(self, "controller", None), "inventory", None)
+            if inventory is not None:
+                self.model.update(inventory.poll())
+            self._refresh_entries()
+            self.status_var.set(self._t("delete_done" if success else "delete_failed"))
+            if not success:
+                _message(self._t("delete_failed"))
+
+        threading.Thread(target=work, name="sd2-delete-local-record", daemon=True).start()
+        self.status_var.set(self._t("delete_working"))
+        self.root.after(150, finish)
+        return "break"
+
     def link_selected_server_match(self):
         selection = self.tree.selection()
         if not selection:
-            _message("Select the analysis to link to a server match first." if self.language == "en" else
-                     "请先选中需要关联到服务器对局的分析。")
+            _message(self._t("server_link_select"))
             return
         try:
             entry = self.visible_entries[int(selection[0])]
@@ -1325,10 +1443,10 @@ class DesktopApp:
             _message("The report cannot be read." if english else "无法读取报告。")
             return
         if not messagebox.askyesno(self._t("menu_link_server"),
-            ("Submit this analysis's debrief timeline and replay identity to match it with a server record? "
-             "The .rpl3 file itself is not uploaded. The server verifies the complete replay fingerprint and players."
-             if english else "是否提交该局的任务报告时间表和录像标识，以关联服务器对局记录？"
-             "不会上传 .rpl3 文件本体。服务器将核对完整录像指纹和玩家信息。"), parent=self.root):
+            ("Submit this captured debrief timeline to match it with the server record? "
+             "The .rpl3 file itself is not uploaded."
+             if english else "是否提交已采集的任务报告时间表，以关联服务器对局记录？"
+             "不会上传 .rpl3 文件本体。"), parent=self.root):
             return
         results = queue.Queue(maxsize=1)
 
@@ -1355,10 +1473,9 @@ class DesktopApp:
             self.status_var.set(("Server match association queued; waiting for server verification." if success else
                                  "Server match association could not be queued.") if english else
                                 ("服务器对局关联已入队，等待服务器核验。" if success else "服务器对局关联未能入队。"))
-            _message(("Queued for upload. The server will verify the complete replay fingerprint and players "
-                      "before linking the match." if success else
+            _message(("Queued for upload. The server will verify this timeline before linking the match." if success else
                       "Could not queue this analysis. Select the complete replay belonging to this match and try again.")
-                     if english else ("已加入上传队列。服务器将核对完整录像指纹和玩家信息，再关联对应对局。" if success else
+                     if english else ("已加入上传队列。服务器核验时间表后，会关联对应对局。" if success else
                                       "无法加入上传队列。请确认所选录像完整且属于该局，再重试。"))
 
         threading.Thread(target=work, name="sd2-server-replay-link", daemon=True).start()
@@ -1452,6 +1569,7 @@ class DesktopApp:
                     f"　事件行：{entry.get('rows', 0)}"))
         if entry.get("server"):
             summary += ("　Server: " if english else "　服务器：") + str(entry["server"])
+        summary += ("　Status: " if english else "　状态：") + self._entry_server_status(entry)
         ttk.Label(frame, justify="left", wraplength=820, foreground="#555555",
                   text=summary).pack(anchor="w", pady=(6, 10))
         payload = _read_local_report(entry.get("path"))
@@ -1486,40 +1604,39 @@ class DesktopApp:
         top = ttk.LabelFrame(frame, text=("Players (official scoring and all-component valuation)" if english else
                                           "参与玩家（官方计分与全部组件估值）"), padding=8)
         top.pack(fill="both", expand=True)
-        player_table = ttk.Treeview(top, columns=("name", "kills", "official_k", "official_l", "K", "L"),
+        player_table = ttk.Treeview(top, columns=("name", "official_k", "official_l", "K", "L"),
                                     show="headings", height=8)
-        headings = ((("name", "Player"), ("kills", "Kills"), ("official_k", "Official kill points"),
+        headings = ((("name", "Player"), ("official_k", "Official kill points"),
                      ("official_l", "Official loss points"), ("K", "Reported K"), ("L", "Reported L"))
-                    if english else (("name", "玩家"), ("kills", "击杀数"), ("official_k", "原版击杀分"), ("official_l", "原版损失分"),
+                    if english else (("name", "玩家"), ("official_k", "原版击杀分"), ("official_l", "原版损失分"),
                                      ("K", "报告击杀 K"), ("L", "报告损失 L")))
         for column, heading in headings:
             player_table.heading(column, text=heading)
             player_table.column(column, width=240 if column == "name" else 100, anchor="w")
         player_table.pack(fill="both", expand=True)
-        player_sorter = _SortableTable(player_table, headings, column="kills")
+        player_sorter = _SortableTable(player_table, headings, column="official_k")
         bottom = ttk.LabelFrame(frame, text=("Selected player by model (all components, same valuation as the site)"
                                              if english else "该玩家按型号（全部组件，与网站同一套估值口径）"), padding=8)
         bottom.pack(fill="both", expand=True, pady=(10, 0))
-        model_table = ttk.Treeview(bottom, columns=("model", "kills", "P", "K", "L", "conversion", "exchange"),
+        model_table = ttk.Treeview(bottom, columns=("model", "P", "K", "L", "conversion", "exchange"),
                                    show="headings", height=8)
-        model_headings = ((("model", "Model"), ("kills", "Kills"), ("P", "Investment P"), ("K", "Reported K"), ("L", "Reported L"),
+        model_headings = ((("model", "Model"), ("P", "Investment P"), ("K", "Reported K"), ("L", "Reported L"),
                            ("conversion", "K / P"), ("exchange", "K / L")) if english else
-                          (("model", "型号"), ("kills", "击杀数"), ("P", "投入 P"), ("K", "报告击杀 K"), ("L", "报告损失 L"),
+                          (("model", "型号"), ("P", "投入 P"), ("K", "报告击杀 K"), ("L", "报告损失 L"),
                            ("conversion", "K / P"), ("exchange", "K / L")))
         for column, heading in model_headings:
             model_table.heading(column, text=heading)
             model_table.column(column, width=260 if column == "model" else 85, anchor="w")
         model_table.pack(fill="both", expand=True)
-        model_sorter = _SortableTable(model_table, model_headings, column="kills")
+        model_sorter = _SortableTable(model_table, model_headings, column="K")
         player_rows = []
         for index, player in enumerate(players):
             _scope, metrics = _scope_metrics(player)
             player_rows.append((str(index), (
                 player.get("name") or ("Unnamed" if english else "未命名"),
-                _value(metrics.get("kill_count")),
                 _points(player.get("official_kill_points")), _points(player.get("official_loss_points")),
                 _value(metrics.get("K")), _value(metrics.get("L"))),
-                {"name": player.get("name") or "", "kills": metrics.get("kill_count"),
+                {"name": player.get("name") or "",
                  "official_k": player.get("official_kill_points"), "official_l": player.get("official_loss_points"),
                  "K": metrics.get("K"), "L": metrics.get("L")}))
         player_sorter.set_rows(player_rows)
@@ -1537,10 +1654,9 @@ class DesktopApp:
                     continue
                 model_rows.append((str(index), (
                     unit.get("name") or ("Unidentified model" if english else "未确认型号"),
-                    _value(unit.get("kill_count")),
                     _value(unit.get("P_est")), _value(unit.get("K")), _value(unit.get("L")),
                     _ratio(unit.get("conversion_ratio")), _ratio(unit.get("exchange_ratio"))),
-                    {"model": unit.get("name") or "", "kills": unit.get("kill_count"),
+                    {"model": unit.get("name") or "",
                      "P": unit.get("P_est"), "K": unit.get("K"), "L": unit.get("L"),
                      "conversion": unit.get("conversion_ratio"), "exchange": unit.get("exchange_ratio")}))
             model_sorter.set_rows(model_rows)
@@ -1720,11 +1836,11 @@ class DesktopApp:
                 name = "本地重放：" + (self.model.replay_name or "尚未识别文件名")
                 fingerprint = "SHA-256：" + (self.model.replay_hash or "尚未计算；实时完赛不需要录像 SHA")
             self._set_var("hash_var", name + "\n" + fingerprint)
-            # One line, five counters: what was analyzed, what still waits for a
-            # server session, what waits for upload, what the server received and
-            # what failed. Nothing else belongs on the main window.
+            # Delivery acknowledgement and server matching are separate states.
             counts = self._t("counts", analyzed=self.model.saved, unlinked=self.model.unbound,
                              queued=self.model.pending, received=self.model.sent,
+                             matched=getattr(self.model, "matched", 0),
+                             server_pending=getattr(self.model, "server_pending", 0),
                              failed=self.model.rejected)
             if self.model.inventory_errors:
                 counts += self._t("read_errors", count=self.model.inventory_errors)

@@ -183,6 +183,84 @@ class ReplayCaptureTests(unittest.TestCase):
                 "server_name": "Replay room",
                 "participants": [{"id": "123", "name": "Player", "alliance": 0}]}
 
+    def native_playback(self, *, ended=False, session_id="session-one", **changes):
+        result = {**self.native_session(session_id=session_id), "game_ended": ended,
+                  "context_epoch": hashlib.sha256(session_id.encode()).hexdigest()}
+        result.update(changes)
+        return result
+
+    def test_full_native_replay_without_file_events_is_queued_with_honest_replay_evidence(self):
+        self.tick(native_session=self.native_playback(), report_context_stable=True)
+        report = native_report()
+        self.tick(native_session=self.native_playback(ended=True), report=report, report_context_stable=True)
+        payload = self.payload()
+        self.assertEqual(payload["binding_mode"], "native_session")
+        self.assertEqual(payload["client_context_evidence"]["association"], "native_replay_session")
+        self.assertEqual(payload["client_context_evidence"]["native_source_kind"], "replay")
+        self.assertTrue(payload["client_context_evidence"]["observed_running"])
+        self.assertTrue(payload["client_context_evidence"]["report_observed_after_end"])
+        self.assertNotIn("file_body_io_observed", payload["client_context_evidence"])
+        self.assertNotIn("client_replay_sha256", payload)
+        self.assertEqual(payload["rows"], report["rows"])
+        self.assertEqual(payload["native_players"], report["players"])
+        paths = list((self.config.data_directory / "exports" / "replay-session").glob("*/*.json"))
+        self.assertEqual(len(paths), 1)
+        self.assertEqual(json.loads(paths[0].read_text(encoding="utf-8")), payload)
+        local = json.loads(next((self.config.data_directory / "unbound-replays").glob("*.json")).read_text())
+        self.assertEqual(local["source_kind"], "replay")
+        self.assertEqual(local["session_origin"], "native_replay_context")
+
+    def test_native_replay_capture_survives_unavailable_or_uncertain_file_monitor(self):
+        self.tick(native_session=self.native_playback(), report_context_stable=True, access_uncertain=True)
+        self.tick(native_session=self.native_playback(ended=True), report=native_report(),
+                  report_context_stable=True, access_uncertain=True)
+        self.assertEqual(self.outbox.status()["total"], 1)
+        self.assertEqual(self.payload()["client_context_evidence"]["association"], "native_replay_session")
+
+    def test_report_seen_before_replay_end_cannot_acquire_later_end_evidence(self):
+        self.tick(native_session=self.native_playback(), report_context_stable=True, report=native_report())
+        self.tick(native_session=self.native_playback(ended=True), report_context_stable=True, report=native_report())
+        self.assertEqual(self.outbox.status()["total"], 0)
+        self.tick(native_session=self.native_playback(ended=True), report_context_stable=True, report=native_report(2))
+        self.assertEqual(self.payload()["report_generation"], 2)
+
+    def test_late_start_or_changed_unstable_wrong_native_replay_stays_local(self):
+        cases = [({"ended": True}, {}, True),
+                 ({"ended": False}, {"session_id": "next-session"}, True),
+                 ({"ended": False}, {}, False),
+                 ({"ended": False}, {"game_build": 168062}, True),
+                 ({"ended": False}, {"participants": [{"id": "456", "alliance": 0}]}, True),
+                 ({"ended": False}, {"source_kind": "network_live", "is_replay": False}, True)]
+        for index, (start, changes, stable) in enumerate(cases):
+            with self.subTest(index=index):
+                process = "native-case-" + str(index)
+                self.tick(process_key=process, baseline_ready=True,
+                          native_session=self.native_playback(**start), report_context_stable=True)
+                self.tick(process_key=process, native_session=self.native_playback(ended=True, **changes),
+                          report=native_report(index + 1), report_context_stable=stable)
+        self.assertEqual(self.outbox.status()["total"], 0)
+
+    def test_native_replay_queue_retry_keeps_original_report_identity_after_context_change(self):
+        self.tick(native_session=self.native_playback(), report_context_stable=True)
+        with patch.object(self.outbox, "enqueue", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                self.tick(native_session=self.native_playback(ended=True), report_context_stable=True,
+                          report=native_report())
+        self.tick(process_key=None)
+        payload = self.payload()
+        self.assertEqual(payload["session_id"], "session-one")
+        self.assertEqual(payload["client_context_evidence"]["association"], "native_replay_session")
+        self.assertEqual(len(list((self.config.data_directory / "exports").rglob("*.json"))), 1)
+
+    def test_native_replay_epoch_is_consumed_once_and_header_probes_do_not_replace_queued_status(self):
+        self.tick(native_session=self.native_playback(), report_context_stable=True)
+        self.tick(native_session=self.native_playback(ended=True), report=native_report(), report_context_stable=True)
+        self.tick(native_session=self.native_playback(ended=True), file_events=[self.event(size=40)],
+                  report_context_stable=True)
+        self.assertEqual(self.service.status, "replay_report_queued")
+        self.tick(native_session=self.native_playback(ended=True), report=native_report(2), report_context_stable=True)
+        self.assertEqual(self.outbox.status()["total"], 1)
+
     def test_native_replay_identity_is_retained_without_file_events(self):
         row = {"row_index": 0, "game_time_seconds": 3598.56,
                "killer": {"player_name": "Player", "unit_name": "Tank"},

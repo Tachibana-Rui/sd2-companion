@@ -778,8 +778,10 @@ class CombatStore(CombatReader):
         settled = {"round:" + key: value for key, value in stamps.items()}
         if archives is not None:
             settled["archives"] = archives
-        final = self.inputs_signature(inbox_path, paths, catalog=current_catalog)
-        if final is not None:
-            settled["inputs"] = final
+        # Only certify the snapshot this scan began with. A report arriving
+        # after the accepted-row query must trigger another cycle rather than
+        # being hidden by an end-of-scan signature that already includes it.
+        if signature is not None:
+            settled["inputs"] = signature
         self._store_inputs(settled)
         return {"new_sources": processed, "derived_matches": derived, **self.status()}

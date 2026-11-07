@@ -24,6 +24,7 @@ from .enrollment import (EnrollmentError, INSTALLATIONS_PATH, MAX_REGISTRATION_B
 
 
 API_PATH = "/api/companion/v3/task-reports"
+RECEIPTS_PATH = "/api/companion/v3/receipts"
 COMBAT_PATH = "/api/companion/v3/combat"
 CATALOG_PATH = "/api/companion/v3/catalog"
 ROOMS_PATH = "/api/companion/v3/rooms"
@@ -252,12 +253,19 @@ def validate_payload(payload):
         # map and full ID/alliance roster in ArchiveIndex._replay.
         if not (observed or selected):
             raise ReceiverError("observed_replay_file_access_required")
-    elif (evidence.get("association") != "native_game_session"
-          or evidence.get("session_origin") != "native_game_setup"
-          or evidence.get("native_source_kind") != "network_live"
-          or any(evidence.get(k) is not True for k in ("native_game_ended", "observed_running", "report_observed_after_end"))
-          or not isinstance(evidence.get("context_epoch"), str) or not _HASH.fullmatch(evidence["context_epoch"])):
-        raise ReceiverError("native_live_session_evidence_required")
+    else:
+        native_kind = evidence.get("native_source_kind")
+        association = evidence.get("association")
+        live_context = native_kind == "network_live" and association == "native_game_session"
+        replay_context = native_kind == "replay" and association == "native_replay_session"
+        if (not (live_context or replay_context)
+                or evidence.get("session_origin") != "native_game_setup"
+                or any(evidence.get(k) is not True for k in
+                       ("native_game_ended", "observed_running", "report_observed_after_end"))
+                or not isinstance(evidence.get("context_epoch"), str)
+                or not _HASH.fullmatch(evidence["context_epoch"])
+                or replay_context and not payload.get("map")):
+            raise ReceiverError("native_live_session_evidence_required")
     rows = payload["rows"]
     if not isinstance(rows, list) or len(rows) > MAX_ROWS:
         raise ReceiverError("invalid_rows")
@@ -342,7 +350,7 @@ class ArchiveIndex:
         self.native_sessions = ServerSessionIndex(self.path, ledger=server_sessions,
                                                   require_live_observation=require_live_observation)
 
-    def __call__(self, payload):
+    def __call__(self, payload, *, replay_session_fallback=True):
         if payload.get("schema") not in SUPPORTED_SCHEMAS:
             raise ReceiverError("unsupported_schema")
         if payload.get("binding_mode") == "native_session":
@@ -350,11 +358,17 @@ class ArchiveIndex:
                 return {"pending_reason": "native_roster_incomplete"}
             return self.native_sessions(payload)
         if payload.get("binding_mode") == "replay_sha256":
-            return self._replay(payload)
+            return self._replay(payload, session_fallback=replay_session_fallback)
         raise ReceiverError("invalid_binding_mode")
 
-    def _replay(self, payload):
-        """Associate exact replay bytes; never substitute a session/header hash."""
+    def _replay(self, payload, *, session_fallback=True):
+        """Prefer exact bytes, otherwise verify a unique server-owned session.
+
+        Client and server recordings can have different trailers. A missing
+        file hash can therefore use the full native session metadata against a
+        trusted, finished server archive; a bare session or header hash cannot.
+        An existing but contradictory exact-hash row remains pending.
+        """
         native_roster = _native_roster(payload["native_players"])
         if native_roster is None:
             return {"pending_reason": "native_roster_incomplete"}
@@ -367,7 +381,14 @@ class ArchiveIndex:
             completion = ",completion_status" if "completion_status" in columns else ""
             row = db.execute("SELECT sha256,payload" + completion + " FROM reports WHERE sha256=?", (sha,)).fetchone()
             if row is None:
-                return {"pending_reason": "replay_sha256_not_analyzed"}
+                if not completion or not session_fallback:
+                    return {"pending_reason": "replay_sha256_not_analyzed"}
+                result = self.native_sessions(payload)
+                if result.get("server_sha256"):
+                    return result
+                if result.get("pending_reason") == "server_session_not_finished_or_unmatched":
+                    return {"pending_reason": "replay_sha256_not_analyzed"}
+                return result
             try:
                 if len(row[1]) > 64 * 1024 * 1024:
                     raise ValueError
@@ -413,7 +434,7 @@ class CompositeArchiveIndex:
                              for path in self.paths)
 
     @staticmethod
-    def _has_candidate(path, payload):
+    def _has_candidate(path, payload, *, exact_only=False):
         with closing(open_readonly_database(path)) as db:
             db.execute("PRAGMA query_only=ON")
             columns = {row[1] for row in db.execute("PRAGMA table_info(reports)")}
@@ -425,8 +446,11 @@ class CompositeArchiveIndex:
             if not {"sha256", "server_id"} <= source_columns:
                 raise ValueError("invalid_archive_schema")
             if payload["binding_mode"] == "replay_sha256":
-                return db.execute("SELECT 1 FROM reports WHERE sha256=? LIMIT 1",
-                                  (payload["client_replay_sha256"],)).fetchone() is not None
+                if db.execute("SELECT 1 FROM reports WHERE sha256=? LIMIT 1",
+                              (payload["client_replay_sha256"],)).fetchone() is not None:
+                    return True
+                if exact_only or "completion_status" not in columns:
+                    return False
             if payload["binding_mode"] == "native_session" and "completion_status" not in columns:
                 raise ValueError("invalid_archive_schema")
             room = payload.get("room_hint")
@@ -441,11 +465,23 @@ class CompositeArchiveIndex:
     def __call__(self, payload):
         matches = {}
         pending = []
-        for index in self.indexes:
+        exact_indexes = []
+        if payload["binding_mode"] == "replay_sha256":
             try:
-                if not self._has_candidate(index.path, payload):
+                # Literal byte identity takes precedence across ALL rooms.
+                # Validate every archive, even non-candidates, so an unreadable
+                # room cannot hide another exact row with contradictory facts.
+                exact_indexes = [index for index in self.indexes
+                                 if self._has_candidate(index.path, payload, exact_only=True)]
+            except (OSError, sqlite3.Error, ValueError, TypeError, KeyError):
+                return {"pending_reason": "archive_temporarily_unavailable"}
+        for index in exact_indexes or self.indexes:
+            try:
+                if not exact_indexes and not self._has_candidate(index.path, payload):
                     continue
-                result = index(payload)
+                # If an exact row disappears after discovery, retain pending;
+                # never replace that vanished evidence with a session match.
+                result = index(payload, replay_session_fallback=not bool(exact_indexes))
             except (OSError, sqlite3.Error, ValueError, TypeError, KeyError):
                 return {"pending_reason": "archive_temporarily_unavailable"}
             sha = result.get("server_sha256") if isinstance(result, dict) else None
@@ -556,6 +592,7 @@ class ReceiverStore:
                 return {"sha256": sha, "rooms": sorted(set(rooms)), "reason": None,
                         "map": archive_map, "evidence": evidence,
                         "server_state_verified": (payload["binding_mode"] == "native_session"
+                            and payload.get("client_context_evidence", {}).get("native_source_kind") == "network_live"
                             and result.get("server_state_verified") is True)}
             reason = result.get("pending_reason") if isinstance(result, dict) else None
             if not isinstance(reason, str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,79}", reason):
@@ -709,6 +746,22 @@ class ReceiverStore:
                 "archive_rooms": json.loads(row["archive_rooms"]), "pending_reason": row["pending_reason"],
                 "binding_evidence": row["binding_evidence"], "server_state_verified": bool(row["server_state_verified"]),
                 "report": json.loads(row["payload"])}
+
+    def receipt(self, submission_id, *, installation_id=None):
+        """Return owned delivery state only; never return report/player data."""
+        if not isinstance(submission_id, str) or not _HASH.fullmatch(submission_id):
+            raise ReceiverError("invalid_submission_id")
+        with self._connection() as db:
+            row = db.execute("SELECT installation_id,status,pending_reason FROM submissions WHERE submission_id=?",
+                             (submission_id,)).fetchone()
+        if row is None or installation_id is not None and row["installation_id"] != installation_id:
+            return None
+        result = {"submission_id": submission_id, "status": row["status"]}
+        if row["status"] == "pending_match":
+            reason = row["pending_reason"]
+            if isinstance(reason, str) and re.fullmatch(r"[a-z][a-z0-9_]{0,79}", reason):
+                result["pending_reason"] = reason
+        return result
 
 
 class CatalogSource:
@@ -885,6 +938,14 @@ class _Handler(BaseHTTPRequestHandler):
                     self._reply(401, {"error": "unauthorized"})
                     return
                 self._catalog()
+                return
+            receipt = re.fullmatch(re.escape(RECEIPTS_PATH) + r"/([0-9a-f]{64})", self.path)
+            if receipt:
+                if not self._authorized(allow_installation=True):
+                    self._reply(401, {"error": "unauthorized"})
+                    return
+                result = self.server.store.receipt(receipt[1], installation_id=self.installation_id)
+                self._reply(200 if result is not None else 404, result or {"error": "not_found"})
                 return
             raw_report = re.fullmatch(re.escape(API_PATH) + r"/([0-9a-f]{64})", self.path)
             player = re.fullmatch(re.escape(COMBAT_PATH) + r"/players/([0-9]{1,20})", self.path)
@@ -1070,8 +1131,14 @@ class ReceiverServer(ThreadingHTTPServer):
             self.store.reconcile()
             self.store.last_reconcile_error = None
             if self.combat_store is not None:
+                # Reconciliation can accept a retained report without any
+                # archive change (for example after repairing the matcher).
+                # Its post-reconcile state must invalidate the derived cache.
+                signature = self.combat_store.inputs_signature(self.store.path, paths)
                 self.combat_store.refresh(self.store.path, paths, signature=signature)
-                self._inputs_signature = self.combat_store.inputs_signature(self.store.path, paths)
+                # Do not mark arrivals during the scan as processed. They must
+                # make the next cycle run even if this refresh succeeded.
+                self._inputs_signature = signature
         except (OSError, sqlite3.Error, ValueError) as error:
             # Keep serving, but never hide a stalled backlog: the status
             # endpoint reports the last failure instead of swallowing it.

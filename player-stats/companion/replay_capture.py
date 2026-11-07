@@ -1,9 +1,11 @@
-"""Automatic local replay report capture from observed game file I/O.
+"""Capture replay reports from native playback or observed game file I/O.
 
 The observer supplies actual process file reads/writes, never a newest-file
 guess. File hashing runs independently of native report sampling. Hash equality
 binds the eventual submission to archive bytes; it does not authenticate a
 client's report or prove that every file I/O request was a playback action.
+A stable native replay lifecycle can identify the server session independently
+of file events; both paths still require the server's finished archive.
 """
 from __future__ import annotations
 
@@ -13,6 +15,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import struct
 import threading
 import time
@@ -28,6 +31,7 @@ from .state import report_key, roster_matches
 MAX_REPLAY_BYTES = 1024 * 1024 * 1024
 MAX_HEADER_PROBES = 2000
 MAX_FILE_EVENTS = 256
+_EPOCH = re.compile(r"[0-9a-f]{64}\Z")
 
 
 class ReplayFileError(ValueError):
@@ -160,10 +164,16 @@ class _Process:
     blocked: bool = False
     opened_at: float = 0.0
     report_barrier_at: float = 0.0
+    native_replay: dict | None = None
+    replay_running: bool = False
+    replay_ended_at: float | None = None
+    consumed_replay_epochs: set = field(default_factory=set)
+    report_native_evidence: dict | None = None
+    completed_replay: bool = False
 
 
 class ReplayCaptureService:
-    """Capture native reports after a uniquely corroborated local replay I/O."""
+    """Preserve replay reports and submit independently verified identities."""
     flush = CompanionService.flush
     _emit = CompanionService._emit
 
@@ -199,9 +209,45 @@ class ReplayCaptureService:
                 candidate.events = events
                 candidate.version += 1
         state.pending_report = None
+        state.report_native_evidence = None
         state.report_at = None
         state.blocked = False
+        state.completed_replay = False
         state.opened_at = now
+
+    @staticmethod
+    def _same_native_replay(first, second):
+        fields = ("session_id", "context_epoch", "game_build", "map", "participants", "source_kind", "is_replay")
+        return bool(first and second and all(first.get(key) == second.get(key) for key in fields))
+
+    def _observe_native_replay(self, state, observation, now):
+        session = observation.get("native_session")
+        if (not observation.get("report_context_stable") or not isinstance(session, dict)
+                or session.get("source_kind") != "replay" or session.get("is_replay") is not True
+                or not isinstance(session.get("context_epoch"), str)
+                or not _EPOCH.fullmatch(session["context_epoch"])):
+            state.native_replay, state.replay_running, state.replay_ended_at = None, False, None
+            return
+        if not self._same_native_replay(state.native_replay, session):
+            state.replay_running, state.replay_ended_at = False, None
+            state.completed_replay = False
+        if session.get("game_ended") is False:
+            if state.replay_ended_at is not None:
+                state.consumed_replay_epochs.add(session["context_epoch"])
+            state.replay_running = True
+        elif session.get("game_ended") is True and state.replay_running and state.replay_ended_at is None:
+            state.replay_ended_at = now
+        state.native_replay = dict(session)
+
+    def _native_report_evidence(self, state, session):
+        if (not self._same_native_replay(state.native_replay, session)
+                or not state.replay_running or state.replay_ended_at is None
+                or session.get("game_ended") is not True
+                or session["context_epoch"] in state.consumed_replay_epochs):
+            return None
+        return {"association": "native_replay_session", "session_origin": "native_game_setup",
+                "native_source_kind": "replay", "native_game_ended": True, "observed_running": True,
+                "report_observed_after_end": True, "context_epoch": session["context_epoch"]}
 
     @staticmethod
     def _event_dict(event):
@@ -311,7 +357,8 @@ class ReplayCaptureService:
         # A new access can supply body evidence after a header-only probe.
         if candidate.snapshot and candidate.snapshot.sha256 is None:
             candidate.snapshot = None
-        self.status = "replay_file_access_observed"
+        if not state.completed_replay:
+            self.status = "replay_file_access_observed"
 
     def _hashes(self, state, now):
         for candidate in state.candidates.values():
@@ -409,7 +456,7 @@ class ReplayCaptureService:
                 and isinstance(session.get("map"), str) and session["map"]):
             return {**{key: session[key] for key in ("map", "server_name", "session_id")
                        if isinstance(session.get(key), str) and session[key]},
-                    "session_origin": "native_replay_context"}
+                    "session_origin": "native_replay_context", "source_kind": "replay"}
         identities = {}
         for candidate in state.candidates.values():
             snapshot = getattr(candidate, "snapshot", None)
@@ -467,8 +514,12 @@ class ReplayCaptureService:
     def _commit(state, key, cutoff):
         state.handled.add(key)
         if state.pending_report is not None and report_key(state.pending_report) == key:
+            if state.report_native_evidence:
+                state.consumed_replay_epochs.add(state.report_native_evidence["context_epoch"])
             state.pending_report = None
+            state.report_native_evidence = None
             state.report_at = None
+        state.completed_replay = True
         # Preserve accesses which occurred after this report for the next run.
         for name, candidate in list(state.candidates.items()):
             candidate.events = [event for event in candidate.events if event[3] > cutoff]
@@ -478,9 +529,55 @@ class ReplayCaptureService:
                 del state.candidates[name]
 
     def _write_export(self, payload):
-        atomic_json(self.config.data_directory / "exports" / payload["client_replay_sha256"] /
-                    (payload["submission_id"] + ".json"), payload)
+        if payload.get("client_replay_sha256"):
+            directory = self.config.data_directory / "exports" / payload["client_replay_sha256"]
+        else:
+            session_hash = hashlib.sha256(payload["session_id"].encode()).hexdigest()
+            directory = self.config.data_directory / "exports" / "replay-session" / session_hash
+        atomic_json(directory / (payload["submission_id"] + ".json"), payload)
         self.outbox.enqueue(payload)
+
+    def _emit_queued(self, payload, replay_name=None):
+        fields = {"rows": len(payload["rows"]), "session_id": payload["session_id"], **report_quality(payload)}
+        if payload.get("client_replay_sha256"):
+            fields.update(replay_sha256=payload["client_replay_sha256"], replay_name=replay_name)
+        self.status = "replay_report_queued"
+        self._emit(self.status, **fields)
+
+    def _capture_native_replay(self, process_key, state):
+        """Recover a played replay from its native session, independent of ETW.
+
+        The running/end transition and report/session snapshot are captured
+        together. A report first observed before that transition cannot borrow
+        later evidence. The server still verifies its own finished archive.
+        """
+        report, session, evidence = state.pending_report, state.report_session, state.report_native_evidence
+        if (not evidence or not session or not report
+                or session.get("game_build") != report.get("game_build")
+                or not roster_matches(report.get("players"), session.get("participants", ()))
+                or not isinstance(session.get("map"), str) or not session["map"]):
+            return False
+        immutable = {"schema": TASK_REPORT_SCHEMA, "installation_id": self.outbox.installation_id,
+                     "process_key": process_key, "report_key": report_key(report),
+                     "session_id": session["session_id"], "context_epoch": evidence["context_epoch"],
+                     "association": "native_replay_session"}
+        submission = hashlib.sha256(json.dumps(immutable, sort_keys=True).encode()).hexdigest()
+        payload = {"schema": TASK_REPORT_SCHEMA, "submission_id": submission,
+                   "installation_id": self.outbox.installation_id, "session_id": session["session_id"],
+                   "map": session["map"], **public_report_data(report),
+                   "extractor_version": __version__, "source": "player_client_official_task_report",
+                   "binding_mode": "native_session", "client_context_evidence": dict(evidence)}
+        if session.get("server_name"):
+            payload["server_name"] = session["server_name"]
+        from .receiver import validate_payload
+        validate_payload(payload)
+        key, cutoff = report_key(report), state.report_at
+        self._pending_exports[submission] = (payload, None, state, key, cutoff)
+        self._write_export(payload)
+        self._commit(state, key, cutoff)
+        del self._pending_exports[submission]
+        self._emit_queued(payload)
+        return True
 
     def _recover_pending(self):
         # Report replacement/clear cannot discard a snapshot whose first disk
@@ -491,8 +588,7 @@ class ReplayCaptureService:
             self._write_export(payload)
             self._commit(state, key, cutoff)
             del self._pending_exports[submission_id]
-            self._emit("replay_report_queued", rows=len(payload["rows"]),
-                       replay_sha256=payload["client_replay_sha256"], replay_name=name, **report_quality(payload))
+            self._emit_queued(payload, name)
 
     def _capture(self, process_key, state, now):
         report = state.pending_report
@@ -500,6 +596,8 @@ class ReplayCaptureService:
             return
         self._save_unbound(process_key, state)
         if state.blocked:
+            if self._capture_native_replay(process_key, state):
+                return
             self.status = "replay_access_uncertain_report_retained"
             return
         bindings = {}
@@ -548,9 +646,13 @@ class ReplayCaptureService:
                 continue
             bindings[snapshot.sha256] = (snapshot, evidence, candidate.path.name)
         if unresolved:
+            if self._capture_native_replay(process_key, state):
+                return
             self.status = "replay_report_waiting_for_stable_file"
             return
         if len(bindings) != 1:
+            if self._capture_native_replay(process_key, state):
+                return
             self.status = "replay_report_waiting_for_unique_file" if len(bindings) > 1 else "replay_report_waiting_for_matching_file"
             return
         sha, (snapshot, evidence, replay_name) = next(iter(bindings.items()))
@@ -574,9 +676,7 @@ class ReplayCaptureService:
         self._write_export(payload)
         self._commit(state, report_key(report), state.report_at)
         del self._pending_exports[submission_id]
-        self.status = "replay_report_queued"
-        self._emit(self.status, rows=len(payload["rows"]), replay_sha256=sha, replay_name=replay_name,
-                   **report_quality(payload))
+        self._emit_queued(payload, replay_name)
 
     def tick(self):
         now = self.clock()
@@ -588,6 +688,7 @@ class ReplayCaptureService:
             if clear and not state.clear_seen:
                 self._clear(state, now)
             state.clear_seen = bool(clear)
+            self._observe_native_replay(state, observation, now)
             if observation.get("baseline_ready") and not state.baselined:
                 baseline = observation.get("baseline_report")
                 if baseline is not None:
@@ -618,6 +719,9 @@ class ReplayCaptureService:
                     state.report_session = (dict(session) if isinstance(session, dict)
                         and session.get("source_kind") == "replay" and session.get("is_replay") is True
                         and observation.get("report_context_stable") is True else None)
+                    state.report_native_evidence = (self._native_report_evidence(state, state.report_session)
+                        if state.report_session is not None else None)
+                    state.completed_replay = False
                     state.report_at = now
                     state.report_barrier_at = now
                     state.opened_at = now

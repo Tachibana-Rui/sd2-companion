@@ -19,14 +19,14 @@ WORKSPACE = ROOT.parent
 COMPANION_MODULES = (
     "__init__.py", "aggregation.py", "bootstrap.py", "catalog.py", "cli.py", "config.py",
     "credentials.py", "desktop.py", "enrollment.py", "file_access.py", "getters.py", "http_transport.py",
-    "live_capture.py", "live_runtime.py", "local_replay_library.py", "maps.py",
+    "live_capture.py", "live_runtime.py", "local_replay_library.py", "local_deletion.py", "maps.py",
     "native_report.py", "native_session.py", "native_stats.py", "outbox.py", "pricing.py",
     "receiver.py", "replay_association.py", "replay_capture.py", "replay_evidence.py", "replay_runtime.py",
     "replays.py", "resources.py", "runtime.py", "server_sessions.py", "service.py",
     "state.py", "updater.py", "upload.py", "windows.py", "install-update.ps1",
 )
 SUPPORT_FILES = (
-    "player-stats/player_companion.py", "player-stats/build_companion.py",
+    "player-stats/player_companion.py", "player-stats/build_companion.py", "player-stats/companion_receiver.py",
     "player-stats/export_companion.py", "player-stats/run_companion.cmd",
     "player-stats/requirements-build.txt", "player-stats/companion.example.json",
     "player-stats/replay_parser.py", "player-stats/replay_stream.py",
@@ -45,7 +45,8 @@ TEST_MODULES = (
     "test_companion_http_transport.py",
     "test_companion_desktop.py", "test_companion_enrollment.py", "test_companion_file_access.py",
     "test_companion_live_capture.py", "test_companion_live_integration.py", "test_companion_live_runtime.py",
-    "test_companion_local_replay_library.py", "test_companion_native_report.py",
+    "test_companion_local_replay_library.py", "test_companion_local_deletion.py", "test_companion_receipts.py", "test_companion_native_report.py",
+    "test_companion_multi_archive.py",
     "test_companion_native_session.py", "test_companion_native_stats.py",
     "test_companion_readonly_database.py", "test_companion_receiver.py", "test_companion_registry.py",
     "test_companion_replay_association.py",

@@ -261,7 +261,7 @@ class CombatTests(unittest.TestCase):
 
     def test_pending_match_never_enters_derived_totals(self):
         receiver, store = self.setup_stores()
-        report = payload(); report["client_replay_sha256"] = "f" * 64
+        report = payload(); report["session_id"] = "not-the-server-session"
         self.assertEqual(receiver.submit(report)["status"], "pending_match")
         self.assertEqual(store.refresh(self.inbox, [self.archive])["derived_matches"], 0)
         self.assertFalse(store.player("123")["available"])
@@ -401,10 +401,64 @@ class CombatTests(unittest.TestCase):
                 self.assertEqual(reconcile.call_count, 2)
                 # A new upload also wakes the cycle without waiting for the archive.
                 pending = payload("e" * 64)
-                pending["client_replay_sha256"] = "f" * 64
+                pending["session_id"] = "not-the-server-session"
                 self.assertEqual(receiver.submit(pending)["status"], "pending_match")
                 server.service_actions()
                 self.assertEqual(reconcile.call_count, 3)
+        finally:
+            server.server_close()
+
+    def test_reconcile_acceptance_invalidates_previously_cached_pending_signature(self):
+        receiver, combat = self.setup_stores()
+        receiver.submit(payload())
+        original = receiver.archive_index
+        class GatedIndex:
+            path = original.path
+            native_sessions = original.native_sessions
+            ready = False
+            def __call__(self, report):
+                if report['submission_id'] == 'b' * 64 and not self.ready:
+                    return {'pending_reason': 'archive_match_pending'}
+                return original(report)
+        gate = GatedIndex()
+        receiver.archive_index = gate
+        second = payload('b' * 64)
+        self.assertEqual(receiver.submit(second)['status'], 'pending_match')
+        combat.refresh(self.inbox, [self.archive])
+        gate.ready = True  # Matcher repair, without archive or inbox edits.
+        server = create_server(receiver, 'fixture-token', combat_store=combat)
+        server.reconcile_interval = 0
+        try:
+            server.service_actions()
+            self.assertEqual(receiver.report(second['submission_id'])['status'], 'accepted')
+            with contextlib.closing(sqlite3.connect(self.combat)) as db:
+                self.assertEqual(db.execute('SELECT COUNT(*) FROM source_reports').fetchone()[0], 2)
+            self.assertEqual(combat.status()['match_count'], 1)
+        finally:
+            server.server_close()
+
+    def test_arrival_during_derivation_remains_unprocessed_until_next_cycle(self):
+        receiver, combat = self.setup_stores()
+        receiver.submit(payload())
+        original = derive_match
+        arrived = False
+        def with_arrival(*args, **kwargs):
+            nonlocal arrived
+            if not arrived:
+                arrived = True
+                self.assertEqual(receiver.submit(payload('b' * 64))['status'], 'accepted')
+            return original(*args, **kwargs)
+        server = create_server(receiver, 'fixture-token', combat_store=combat)
+        server.reconcile_interval = 0
+        try:
+            with patch('companion.aggregation.derive_match', side_effect=with_arrival):
+                server.service_actions()
+            with contextlib.closing(sqlite3.connect(self.combat)) as db:
+                self.assertEqual(db.execute('SELECT COUNT(*) FROM source_reports').fetchone()[0], 1)
+            server.service_actions()
+            with contextlib.closing(sqlite3.connect(self.combat)) as db:
+                self.assertEqual(db.execute('SELECT COUNT(*) FROM source_reports').fetchone()[0], 2)
+            self.assertEqual(combat.status()['match_count'], 1)
         finally:
             server.server_close()
 

@@ -65,6 +65,7 @@ class LiveCaptureTests(unittest.TestCase):
         self.assertEqual(local["schema"], "sd2-local-unbound-task-report-v4")
         self.assertEqual(local["report"]["rows"], payload["rows"])
         self.assertEqual(local["report"]["native_players"], payload["native_players"])
+        self.assertEqual(local["source_kind"], "network_live")
         self.assertFalse({"variant_address", "result_address", "generation", "metadata"} & local["report"].keys())
         self.assertFalse({"match_binding", "report_scope"} & payload.keys())
         self.assertEqual(self.outbox.status()["pending"], 1)
@@ -110,13 +111,21 @@ class LiveCaptureTests(unittest.TestCase):
 
     def test_unbound_snapshot_keeps_the_session_map_server_and_id(self):
         # Without this the results list shows a blank map for a local-only match.
-        self.tick(native_session=None, report=native_report(), report_context_stable=False)
-        self.tick(native_session=session(ended=True), report=native_report())
+        self.tick(process_key="late-known", baseline_ready=True, native_session=session(ended=True))
+        self.tick(process_key="late-known", native_session=session(ended=True), report=native_report())
         snapshot = json.loads(self.unbound()[0].read_text(encoding="utf-8"))
         self.assertEqual(snapshot["map"], "map-one")
         self.assertEqual(snapshot["server_name"], "Test Room")
         self.assertEqual(snapshot["session_id"], "session-one")
         self.assertEqual(snapshot["status"], "local_only_not_session_verified")
+        self.assertEqual(snapshot["source_kind"], "network_live")
+
+    def test_unknown_report_metadata_never_borrows_an_earlier_or_future_session(self):
+        self.tick(native_session=None, report=native_report(), report_context_stable=False)
+        self.tick(native_session=session(sid="another-session", map_id="different-map", ended=True),
+                  report=native_report())
+        snapshot = json.loads(self.unbound()[0].read_text(encoding="utf-8"))
+        self.assertFalse({"session_id", "map", "source_kind", "session_origin"} & snapshot.keys())
 
     def test_replay_source_never_uses_live_session_even_with_matching_roster(self):
         self.tick(native_session=session(ended=True, replay=True), report=native_report())
@@ -176,6 +185,9 @@ class LiveCaptureTests(unittest.TestCase):
         self.tick(native_session=session(sid="unrelated"), report_identity_clear=True)
         self.assertEqual(self.payloads()[0]["session_id"], "session-one")
         self.assertEqual(self.payloads()[0]["report_generation"], 1)
+        local = json.loads(self.unbound()[0].read_text(encoding="utf-8"))
+        self.assertEqual(local["session_id"], "session-one")
+        self.assertEqual(local["source_kind"], "network_live")
 
     def test_unbound_write_failure_survives_process_exit_without_losing_payload(self):
         with patch("companion.live_capture.atomic_json", side_effect=OSError("disk full")):
@@ -261,15 +273,18 @@ class AutomaticCaptureRoutingTests(unittest.TestCase):
         self.assertEqual(self.outbox.status()["total"], 0)
         self.assertEqual(len(list((self.config.data_directory / "unbound-live").glob("*.json"))), 1)
 
-    def test_live_recording_write_cannot_identify_a_later_cloud_replay_without_file_io(self):
+    def test_replay_after_live_without_file_io_uses_its_own_native_playback_evidence(self):
         recorded = self.file_event();recorded["operation"] = "write"
         self.tick(native_session=session(), file_events=[recorded])
         self.tick(native_session=session(ended=True), report=native_report())
         self.tick(native_session=session(replay=True))
         self.tick(native_session=session(replay=True, ended=True), report=native_report(2))
         for _ in range(3):self.tick(native_session=session(replay=True, ended=True))
-        modes = [job["payload"]["binding_mode"] for job in self.outbox.due(now=1e12)]
-        self.assertEqual(modes, ["native_session"])
+        payloads = [job["payload"] for job in self.outbox.due(now=1e12)]
+        self.assertEqual([payload["binding_mode"] for payload in payloads], ["native_session", "native_session"])
+        self.assertEqual({payload["client_context_evidence"]["association"] for payload in payloads},
+                         {"native_game_session", "native_replay_session"})
+        self.assertFalse(any("client_replay_sha256" in payload for payload in payloads))
 
     def test_new_replay_file_after_live_round_is_not_ambiguous_with_live_recording(self):
         recorded = self.file_event();recorded["operation"] = "write"

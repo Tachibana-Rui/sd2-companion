@@ -20,6 +20,7 @@ from unittest.mock import patch
 from companion.file_access import FileMonitorError
 from companion.live_capture import AutomaticCaptureService
 from companion.live_runtime import AutomaticWindowsObserver
+from companion.native_session import REPLAY_SOURCE_VTABLE_RVA
 from companion.outbox import Outbox
 from companion.receiver import API_PATH, ArchiveIndex, ReceiverStore, create_server
 from companion.upload import Uploader
@@ -180,6 +181,43 @@ class NativeLiveIntegrationTests(unittest.TestCase):
         self.assertEqual(self.box.status()['total'], 1)
         self.assertEqual(self.uploader.send(payload)['status'], 'duplicate')
         self.assertEqual(self.store.status()['submissions']['total'], 1)
+
+    def test_forgotten_live_capture_is_recovered_by_full_replay_without_file_monitor(self):
+        # The real match ended before this companion saw it. Playing its replay
+        # supplies a different, verified native source and a fresh lifecycle.
+        sha = self.archive_report()
+        archive_before = self.archive.read_bytes()
+        self.native.memory.u64(self.session.source,
+                               self.native.memory.image_base + REPLAY_SOURCE_VTABLE_RVA)
+        self.native.memory.write(self.session.manager + 0x75, b'\x01')
+        playback = self.tick()
+        self.assertEqual(playback['native_session']['source_kind'], 'replay')
+        self.assertFalse(playback['native_session']['game_ended'])
+        self.assertEqual(self.box.status()['total'], 0)
+        self.native.memory.write(self.session.context + 0x59, b'\x01')
+        self.native.memory.write(self.native.variant, struct.pack('<QI4xQ', 8, 1, self.native.result))
+        finished = self.tick()
+        self.assertTrue(finished['report_context_stable'])
+        payload = self.box.due(now=self.clock + 1)[0]['payload']
+        self.assertEqual(payload['client_context_evidence']['association'], 'native_replay_session')
+        self.assertEqual(payload['client_context_evidence']['native_source_kind'], 'replay')
+        self.assertEqual(payload['rows'], self.expected.rows)
+        self.assertNotIn('client_replay_sha256', payload)
+        self.assertNotIn('file_body_io_observed', payload['client_context_evidence'])
+        local = list((self.config.data_directory / 'unbound-replays').glob('*.json'))
+        self.assertEqual(len(local), 1)
+        self.assertEqual(json.loads(local[0].read_text())['source_kind'], 'replay')
+        self.assertFalse(list((self.config.data_directory / 'unbound-live').glob('*.json')))
+        self.assertEqual(self.service.flush(), 1)
+        stored = self.saved()
+        self.assertEqual(stored['status'], 'accepted')
+        self.assertEqual(stored['server_sha256'], sha)
+        self.assertFalse(stored['server_state_verified'])
+        self.assertEqual(self.archive.read_bytes(), archive_before)
+        self.assertEqual(self.monitor.poll_count, 0)
+        self.assertFalse(list(self.base.rglob('*.rpl3')))
+        self.tick()
+        self.assertEqual(self.box.status()['total'], 1)
 
     def test_same_roster_of_another_session_never_substitutes_for_exact_native_sid(self):
         other_sha = self.archive_report(session_id='native:live-cloud-session-B', sha='b' * 64)

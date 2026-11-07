@@ -104,14 +104,11 @@ class LiveCaptureService:
 
     def _persist(self):
         for local_key, item in list(self.pending.items()):
-            report, payload, state, epoch = item
+            report, payload, state, epoch, metadata = item
             name = hashlib.sha256(json.dumps(local_key).encode()).hexdigest()
             # The local snapshot keeps the session map/server when the live session
             # already knows them, so the results list never shows a blank map for a
             # match that only exists locally.
-            session = state.session if isinstance(state.session, dict) else {}
-            metadata = {key: session.get(key) or (payload or {}).get(key)
-                        for key in ("map", "server_name", "session_id")}
             atomic_json(self.config.data_directory / "unbound-live" / (name + ".json"),
                         {"schema": LOCAL_REPORT_SCHEMA, "report": public_report_data(report),
                          "status": "local_only_not_session_verified",
@@ -152,7 +149,15 @@ class LiveCaptureService:
                 elif identity not in state.handled and local_key not in self.pending:
                     payload = self._payload(key, state, report, observation)
                     epoch = state.session.get("context_epoch") if state.session else None
-                    self.pending[local_key] = (report, payload, state, epoch)
+                    session = observation.get("native_session")
+                    metadata = {}
+                    if (observation.get("report_context_stable") and isinstance(session, dict)
+                            and session.get("game_build") == report.get("game_build")
+                            and roster_matches(report.get("players"), session.get("participants", ()))
+                            and session.get("source_kind") in ("network_live", "replay")):
+                        metadata = {name: session.get(name) for name in ("map", "server_name", "session_id")}
+                        metadata.update(source_kind=session["source_kind"], session_origin="native_game_setup")
+                    self.pending[local_key] = (report, payload, state, epoch, metadata)
         self._persist()
         native_status = observation.get("native_status")
         status = observation.get("error") or (native_status if native_status in SCAN_STATES else self.status)
@@ -211,7 +216,7 @@ class AutomaticCaptureService:
         if source_epoch[0] == "network_live" or (not session and previous_source and previous_source[0] == "network_live"):
             replay_observation["file_events"] = []
         monitor_error = observation.get("file_monitor_error")
-        if monitor_error:
+        if monitor_error and not replay:
             replay_observation["error"] = monitor_error
         if monitor_error and monitor_error != self.last_monitor_error:
             self.emit({"event": monitor_error})

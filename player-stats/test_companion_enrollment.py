@@ -13,8 +13,8 @@ from urllib.request import Request, urlopen
 import uuid
 
 from companion.enrollment import EnrollmentError, InstallationRegistry, INSTALLATIONS_PATH, client_address
-from companion.receiver import API_PATH, CatalogSource, ReceiverStore, create_server
-from test_companion_receiver import payload
+from companion.receiver import API_PATH, RECEIPTS_PATH, ArchiveIndex, CatalogSource, ReceiverStore, create_server
+from test_companion_receiver import native_archive, payload
 
 
 def registration():
@@ -144,6 +144,44 @@ class EnrollmentHTTPTests(unittest.TestCase):
             headers={"Idempotency-Key": "probe"})
         self.assertEqual((status, value.get("error")), (400, "unsupported_schema"))
         self.assertEqual(self.store.status()["submissions"]["total"], 0)
+
+    def test_receipt_endpoint_is_owner_scoped_and_never_exposes_report_data(self):
+        token = self.enroll()
+        report = payload()
+        report['installation_id'] = self.value['installation_id']
+        self.request(API_PATH, value=report, token=token,
+                     headers={'Idempotency-Key': report['submission_id']})
+        path = RECEIPTS_PATH + '/' + report['submission_id']
+        status, headers, receipt = self.request(path, token=token)
+        self.assertEqual(status, 200)
+        self.assertEqual(headers['Cache-Control'], 'no-store')
+        self.assertEqual(receipt, {'submission_id': report['submission_id'], 'status': 'pending_match',
+                                   'pending_reason': 'archive_not_configured'})
+        other = registration()
+        self.registry.register(other)
+        self.assertEqual(self.request(path, token=other['token'])[0], 404)
+        self.assertEqual(self.request(path)[0], 401)
+        self.assertEqual(self.request(RECEIPTS_PATH + '/' + 'f' * 64, token=token)[0], 404)
+        self.assertEqual(self.request(path, token='private-operator-key')[2], receipt)
+        self.assertEqual(self.request(API_PATH + '/' + report['submission_id'], token=token)[0], 401)
+        self.assertEqual(set(receipt), {'submission_id', 'status', 'pending_reason'})
+
+    def test_owned_receipt_updates_after_late_archive_without_resending_report(self):
+        token = self.enroll()
+        report = payload()
+        report['installation_id'] = self.value['installation_id']
+        self.request(API_PATH, value=report, token=token,
+                     headers={'Idempotency-Key': report['submission_id']})
+        path = RECEIPTS_PATH + '/' + report['submission_id']
+        self.assertEqual(self.request(path, token=token)[2]['status'], 'pending_match')
+        archive = self.root / 'late-server.sqlite3'
+        native_archive(archive, room='test-room')
+        self.store.archive_index = ArchiveIndex(archive)
+        self.store.reconcile()
+        status, _, receipt = self.request(path, token=token)
+        self.assertEqual((status, receipt), (200, {'submission_id': report['submission_id'], 'status': 'accepted'}))
+        self.assertEqual(self.store.status()['submissions']['total'], 1)
+        self.assertEqual(self.store.report(report['submission_id'])['report'], report)
 
     def test_oversized_registration_is_rejected_and_conflicting_key_preserved(self):
         self.enroll()
