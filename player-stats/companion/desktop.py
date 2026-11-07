@@ -1265,12 +1265,6 @@ class DesktopApp:
         for variable in (self.status_var, self.session_var, self.hash_var, self.counts_var,
                          self.quality_var, self.catalog_var, self.code_var):
             ttk.Label(frame, textvariable=variable, wraplength=700, justify="left").pack(anchor="w", pady=3)
-        ttk.Label(frame, justify="left", wraplength=700,
-                  text=("Server addresses, the upload endpoint and credentials are never shown here. "
-                        "The config file is base64-encoded and the credential comes from the environment; "
-                        "this window only reports capture state and counters." if english else
-                        "服务器地址、上传接口与凭证不会在此显示。配置文件以 base64 保存，"
-                        "凭证只从环境变量读取；此处只显示采集状态与计数。")).pack(anchor="w", pady=(12, 0))
         ttk.Button(frame, text=("Close" if english else "关闭"),
                    command=window.destroy).pack(anchor="e", pady=(12, 0))
         self.diagnostics_window = window
@@ -1658,7 +1652,8 @@ class DesktopApp:
                     _ratio(unit.get("conversion_ratio")), _ratio(unit.get("exchange_ratio"))),
                     {"model": unit.get("name") or "",
                      "P": unit.get("P_est"), "K": unit.get("K"), "L": unit.get("L"),
-                     "conversion": unit.get("conversion_ratio"), "exchange": unit.get("exchange_ratio")}))
+                     "conversion": _ratio_sort_value(unit.get("conversion_ratio")),
+                     "exchange": _ratio_sort_value(unit.get("exchange_ratio"))}))
             model_sorter.set_rows(model_rows)
 
         player_table.bind("<<TreeviewSelect>>", fill_models)
@@ -1913,9 +1908,20 @@ def _value(value):
 
 
 def _ratio(value):
+    if value == "+inf":
+        return "+∞"
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
         return "—"
     return f"{value:.2f}"
+
+
+def _ratio_sort_value(value):
+    """Only ratios translate the JSON-safe infinity marker to a numeric rank."""
+    if value == "+inf":
+        return math.inf
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return None
+    return value
 
 
 def _read_local_report(path):

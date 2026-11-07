@@ -21,7 +21,7 @@ from . import open_readonly_database
 from .pricing import Catalog
 
 
-MODEL_VERSION = "sd2-combat-economy-v7"
+MODEL_VERSION = "sd2-combat-economy-v8"
 SCOPES = ("all_components", "main", "transport")
 HASH = re.compile(r"[0-9a-f]{64}\Z")
 PLAYER = re.compile(r"(?:0|[1-9][0-9]{0,19})\Z")
@@ -97,6 +97,20 @@ def _metric(scope, **identity):
             "attribution": None, "P_available": False}
 
 
+def ratio_value(numerator, denominator):
+    """JSON-safe ratio: unknown or 0/0 is null; nonzero/0 is +infinity.
+
+    A string sentinel preserves the requested ordering without emitting an
+    invalid JSON Infinity token. Finite zero results remain real zero values.
+    """
+    if any(isinstance(value, bool) or not isinstance(value, (int, float))
+           or not math.isfinite(value) for value in (numerator, denominator)):
+        return None
+    if denominator == 0:
+        return "+inf" if numerator != 0 else None
+    return numerator / denominator
+
+
 def _finish(row):
     result = dict(row)
     result["P_est"] = row["P_known_value"] if row["P_available"] and not row["unknown_input_count"] else None
@@ -105,9 +119,9 @@ def _finish(row):
     result["L"] = row["L_known_value"] if not any(row[k] for k in
         ("unknown_loss_value_count", "unknown_loss_attribution_count", "unknown_loss_scope_count")) else None
     p, k, loss = result["P_est"], result["K"], result["L"]
-    result["conversion_ratio"] = k / p if p is not None and p > 0 and k is not None else None
-    result["net_exchange_per_input"] = (k - loss) / p if p is not None and p > 0 and k is not None and loss is not None else None
-    result["exchange_ratio"] = k / loss if loss is not None and loss > 0 and k is not None else None
+    result["conversion_ratio"] = ratio_value(k, p)
+    result["net_exchange_per_input"] = ratio_value(k - loss, p) if k is not None and loss is not None else None
+    result["exchange_ratio"] = ratio_value(k, loss)
     result["conversion_sample_count"] = int(result["conversion_ratio"] is not None)
     result["net_sample_count"] = int(result["net_exchange_per_input"] is not None)
     result["exchange_sample_count"] = int(result["exchange_ratio"] is not None)
@@ -136,15 +150,16 @@ def _summarize(rows):
     result["role_scope"] = rows[0]["role_scope"]
     result["P_available"] = all(row["P_est"] is not None for row in rows)
     result = _finish(result)
-    conversion = [r for r in rows if r["P_est"] is not None and r["P_est"] > 0 and r["K"] is not None]
-    net = [r for r in conversion if r["L"] is not None]
-    exchange = [r for r in rows if r["K"] is not None and r["L"] is not None and r["L"] > 0]
+    conversion = [r for r in rows if ratio_value(r["K"], r["P_est"]) is not None]
+    net = [r for r in rows if r["K"] is not None and r["L"] is not None
+           and ratio_value(r["K"] - r["L"], r["P_est"]) is not None]
+    exchange = [r for r in rows if ratio_value(r["K"], r["L"]) is not None]
     result.update(sample_count=len(rows), conversion_sample_count=len(conversion), net_sample_count=len(net),
                   exchange_sample_count=len(exchange), conversion_sample_P_est=sum(r["P_est"] for r in conversion),
                   conversion_sample_K=sum(r["K"] for r in conversion))
-    result["conversion_ratio"] = sum(r["K"] for r in conversion) / sum(r["P_est"] for r in conversion) if conversion else None
-    result["net_exchange_per_input"] = sum(r["K"] - r["L"] for r in net) / sum(r["P_est"] for r in net) if net else None
-    result["exchange_ratio"] = sum(r["K"] for r in exchange) / sum(r["L"] for r in exchange) if exchange else None
+    result["conversion_ratio"] = ratio_value(sum(r["K"] for r in conversion), sum(r["P_est"] for r in conversion)) if conversion else None
+    result["net_exchange_per_input"] = ratio_value(sum(r["K"] - r["L"] for r in net), sum(r["P_est"] for r in net)) if net else None
+    result["exchange_ratio"] = ratio_value(sum(r["K"] for r in exchange), sum(r["L"] for r in exchange)) if exchange else None
     return result
 
 

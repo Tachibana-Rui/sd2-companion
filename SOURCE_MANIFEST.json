@@ -14,8 +14,8 @@
     },
     {
       "path": "README.md",
-      "bytes": 10475,
-      "sha256": "e12992a8e28008e60b9c438a45f6d113cd82bc8255ca804b7f11b7cbb4a09158"
+      "bytes": 11122,
+      "sha256": "b378ab015bc1cd0df9dad27517fe34040897eedae619e9ca82d1a7668f72256c"
     },
     {
       "path": "THIRD_PARTY_NOTICES.md",
@@ -50,12 +50,12 @@
     {
       "path": "player-stats/companion/__init__.py",
       "bytes": 1163,
-      "sha256": "3f88c22547b514deac1c17c814fa938790efe49880e4337ad1a4c57ae9e40955"
+      "sha256": "15cc78c77a5bea35ee1a368557e4f25d5350c71f11ad3e1b863a9c1e241b2cf3"
     },
     {
       "path": "player-stats/companion/aggregation.py",
-      "bytes": 48770,
-      "sha256": "74ebd196f18d603c24ebc85b0e0182bab701fabc4c4eab6ec3692bca7e47860d"
+      "bytes": 49303,
+      "sha256": "eb116ca7bfabca88328ce3ecfee795e89c44c17ee121648db4d84b70a2871184"
     },
     {
       "path": "player-stats/companion/bootstrap.py",
@@ -84,8 +84,8 @@
     },
     {
       "path": "player-stats/companion/desktop.py",
-      "bytes": 109866,
-      "sha256": "2e6eb041a219ec7cd2a86dc5b2ee2a13459d2909932c34111b4c79280711088e"
+      "bytes": 109654,
+      "sha256": "6e35d0767ab13bf27ed0bbc22d02c95bce63b8a6fd034da49197b742878ec949"
     },
     {
       "path": "player-stats/companion/enrollment.py",
@@ -289,8 +289,8 @@
     },
     {
       "path": "player-stats/publication/README.md",
-      "bytes": 10475,
-      "sha256": "e12992a8e28008e60b9c438a45f6d113cd82bc8255ca804b7f11b7cbb4a09158"
+      "bytes": 11122,
+      "sha256": "b378ab015bc1cd0df9dad27517fe34040897eedae619e9ca82d1a7668f72256c"
     },
     {
       "path": "player-stats/publication/THIRD_PARTY_NOTICES.md",
@@ -359,8 +359,8 @@
     },
     {
       "path": "player-stats/test_companion_combat.py",
-      "bytes": 27189,
-      "sha256": "2807ad97f36a93fe301905dd69cbe0228f158a2df69a5b99e3b747b794538930"
+      "bytes": 31035,
+      "sha256": "d781760aaef9fcef9b21e29a4632aa13c2b704fd44e17c9a0211e6aa814135ae"
     },
     {
       "path": "player-stats/test_companion_core.py",
@@ -384,8 +384,8 @@
     },
     {
       "path": "player-stats/test_companion_desktop.py",
-      "bytes": 86554,
-      "sha256": "9be39fe9384ca8e0040864d39c82060af32d7e153ff385220386e586bb8f3dec"
+      "bytes": 90805,
+      "sha256": "af059f6e25a0920d80dd251f52a90dea404edd60eb1e88fc834d880c68711c2f"
     },
     {
       "path": "player-stats/test_companion_enrollment.py",

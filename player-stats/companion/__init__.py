@@ -3,7 +3,7 @@
 import sqlite3
 from pathlib import Path
 
-__version__ = "0.5.4"
+__version__ = "0.5.5"
 UPDATE_URL = "https://sd2.rui-blog.link/downloads/sd2-companion/update.json"
 
 

@@ -13,7 +13,7 @@ import unittest
 import uuid
 from unittest.mock import patch
 
-from companion.aggregation import CombatReader, CombatStore, derive_match
+from companion.aggregation import CombatReader, CombatStore, _finish, _metric, _summarize, derive_match, ratio_value
 from companion.pricing import Catalog
 from companion.receiver import API_PATH, COMBAT_PATH, TASK_SCHEMA, ArchiveIndex, CompositeArchiveIndex, ReceiverError, ReceiverStore, create_server, validate_payload
 
@@ -235,12 +235,73 @@ class CombatTests(unittest.TestCase):
         self.assertIsNone(one["economy"]["conversion_ratio"])
         self.assertEqual(one["official_kill_points"], 1234)
 
-    def test_zero_input_and_zero_losses_are_null_ratios(self):
+    def test_nonzero_kills_over_zero_input_and_zero_losses_are_json_safe_infinity(self):
         report = payload(); report["rows"] = report["rows"][:2]
         result = derive_match(report, archive_document(count=0), self.catalog)["players"][0]
         self.assertEqual(result["economy"]["P_est"], 0)
-        self.assertIsNone(result["economy"]["conversion_ratio"])
-        self.assertIsNone(result["economy"]["exchange_ratio"])
+        self.assertEqual(result["economy"]["conversion_ratio"], "+inf")
+        self.assertEqual(result["economy"]["exchange_ratio"], "+inf")
+        self.assertEqual(result["economy"]["net_exchange_per_input"], "+inf")
+        json.dumps(result, allow_nan=False)
+
+    def test_ratio_zero_numerator_zero_denominator_and_unknown_are_distinct(self):
+        cases = ((0, 0, None), (100, 0, "+inf"), (-100, 0, "+inf"),
+                 (0, 100, 0.0), (100, 40, 2.5), (None, 0, None),
+                 (100, None, None), (True, 0, None), (float("inf"), 1, None))
+        for numerator, denominator, expected in cases:
+            with self.subTest(numerator=numerator, denominator=denominator):
+                self.assertEqual(ratio_value(numerator, denominator), expected)
+        empty = _finish({**_metric("main"), "P_available": True})
+        self.assertIsNone(empty["conversion_ratio"])
+        self.assertIsNone(empty["exchange_ratio"])
+        self.assertIsNone(empty["net_exchange_per_input"])
+
+    def test_zero_loss_and_zero_input_samples_stay_in_aggregate_totals(self):
+        def metric(p, k, loss):
+            return _finish({**_metric("main"), "P_available": True,
+                            "P_known_value": p, "K_known_value": k, "L_known_value": loss})
+        no_loss = metric(0, 200, 0)
+        other = metric(100, 100, 100)
+        total = _summarize([no_loss, other, metric(0, 0, 0)])
+        self.assertEqual(total["conversion_sample_count"], 2)
+        self.assertEqual(total["exchange_sample_count"], 2)
+        self.assertEqual(total["conversion_sample_K"], 300)
+        self.assertEqual(total["conversion_sample_P_est"], 100)
+        self.assertEqual(total["conversion_ratio"], 3.0)
+        self.assertEqual(total["exchange_ratio"], 3.0)
+        self.assertEqual(total["net_exchange_per_input"], 2.0)
+        only_infinite = _summarize([no_loss, metric(0, 50, 0)])
+        self.assertEqual(only_infinite["conversion_ratio"], "+inf")
+        self.assertEqual(only_infinite["exchange_ratio"], "+inf")
+        # A net ratio has its own numerator and cannot borrow the K/P sample set.
+        self.assertEqual(_summarize([metric(0, 0, 100)])["net_exchange_per_input"], "+inf")
+
+    def test_v7_cache_is_rederived_for_v8_without_rewriting_native_report(self):
+        receiver, store = self.setup_stores()
+        report = payload()
+        report["rows"] = report["rows"][:2]
+        report["report_data"].update(matched_rows=2, total_rows=2)
+        receiver.submit(report)
+        inbox_before = self.inbox.read_bytes()
+        with patch("companion.aggregation.MODEL_VERSION", "sd2-combat-economy-v7"):
+            self.assertEqual(store.refresh(self.inbox, [self.archive])["derived_matches"], 1)
+        with contextlib.closing(sqlite3.connect(self.combat)) as db, db:
+            row = db.execute("SELECT payload FROM player_match_combat WHERE player_user_id='123'").fetchone()
+            old = json.loads(row[0])
+            old["economy"]["exchange_ratio"] = None
+            for metrics in old["economy_by_scope"].values():
+                metrics["exchange_ratio"] = None
+            db.execute("UPDATE player_match_combat SET payload=? WHERE player_user_id='123'", (json.dumps(old),))
+        legacy = CombatReader(self.combat).player("123")
+        self.assertTrue(legacy["available"])
+        self.assertEqual(legacy["economy"]["exchange_ratio"], "+inf")
+        self.assertEqual(store.refresh(self.inbox, [self.archive])["derived_matches"], 1)
+        current = store.player("123")
+        self.assertEqual(current["model_version"], "sd2-combat-economy-v8")
+        self.assertEqual(current["matches"][0]["economy"]["exchange_ratio"], "+inf")
+        self.assertEqual(current["economy"]["exchange_ratio"], "+inf")
+        self.assertEqual(store.refresh(self.inbox, [self.archive])["derived_matches"], 0)
+        self.assertEqual(self.inbox.read_bytes(), inbox_before)
 
     def test_only_accepted_is_derived_and_refresh_is_idempotent_and_read_only(self):
         receiver, store = self.setup_stores()

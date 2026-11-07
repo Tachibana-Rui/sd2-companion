@@ -23,6 +23,8 @@ Select a row and use **File → Delete selected local record…** or press **Del
 
 The current native reader targets game build **168061**. An unsupported executable is rejected instead of being read with guessed offsets. The application does not start or stop the game, inject code, modify game memory, or control game input.
 
+Ratios show zero for zero divided by a positive value, `+∞` for a nonzero numerator divided by zero, and a dash for `0/0` or missing inputs. Positive infinity sorts above every finite ratio; missing values stay last in both sort directions. Multi-match ratios divide compatible numerator totals by denominator totals rather than averaging individual ratios.
+
 ### Data and permissions
 
 The companion enumerates process names to locate Steel Division 2, then queries and reads the verified game process. It does not read other applications' memory or browse personal documents. Local replay access is read-only. Its own configuration, reports, queue and replay evidence are saved beside the configuration file; automatic installation credentials use the current user's Windows credential store.
@@ -83,6 +85,8 @@ SD2 Companion 是 Steel Division 2 的 Windows 伴随程序，用于读取任务
 选中一行后使用 **文件 → 删除所选本机记录…** 或按 **Delete**，可删除该次本机采集并取消其待发送任务；回收副本保存在 `deleted-reports/`。同一局的其他采集、游戏录像文件与网站已收录的数据会保留；重启或后台晚到写入不会恢复已删除的记录。
 
 当前原生读取器适配游戏构建 **168061**，未适配的游戏文件会被拒绝，不会使用猜测的偏移读取。程序不会启动或关闭游戏，不注入代码、不修改游戏内存、不操作游戏输入。
+
+比值中，0 除以正数显示 0，非零数除以 0 显示 `+∞`，`0/0` 或数据未知显示横线。正无穷大于所有有限比值，缺失值在两种排序方向下均放末尾。多局汇总先合计同一可用样本的分子、分母再相除，不平均各局比值。
 
 ### 数据与权限
 

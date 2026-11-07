@@ -908,6 +908,20 @@ class DesktopCaptureTests(unittest.TestCase):
 
 
 class DesktopListFormatTests(unittest.TestCase):
+    def test_ratio_formatter_preserves_zero_and_json_safe_positive_infinity(self):
+        self.assertEqual(desktop._ratio(0), "0.00")
+        self.assertEqual(desktop._ratio(2.5), "2.50")
+        self.assertEqual(desktop._ratio(-0.5), "-0.50")
+        self.assertEqual(desktop._ratio("+inf"), "+∞")
+        self.assertEqual(desktop._ratio_sort_value("+inf"), float("inf"))
+        for value in (None, True, "3.5", float("nan"), float("inf"), float("-inf")):
+            with self.subTest(value=value):
+                self.assertEqual(desktop._ratio(value), "—")
+                self.assertIsNone(desktop._ratio_sort_value(value))
+        # The marker belongs only to ratios, never points or official scores.
+        self.assertEqual(desktop._value("+inf"), "—")
+        self.assertEqual(desktop._points("+inf"), "—")
+
     def test_duration_text_and_nickname_join(self):
         self.assertEqual(desktop._duration_text(0), "0:00")
         self.assertEqual(desktop._duration_text(59.6), "1:00")
@@ -1228,6 +1242,59 @@ class DesktopSortingTests(unittest.TestCase):
         self.root.update()
         self.assertEqual(model_table.set(model_table.get_children()[0], "model"), "Wrong player's unit")
         self.assertIn("▲", model_table.heading("exchange")["text"])
+
+    def test_analysis_ratio_infinity_is_maximum_in_both_actual_header_directions(self):
+        app = self.app()
+        specifications = [("Zero", 0), ("Finite", 1000000000000.25), ("Infinite A", "+inf"),
+                          ("Undefined", None), ("Infinite B", "+inf")]
+        player = {"name": "Fixture player", "official_kill_points": 500,
+                  "economy_by_scope": {"all_components": {"K": 500, "L": 0}},
+                  "units": [{"role_scope": "all_components", "name": name, "K": 100,
+                             "P_est": 0, "L": 0, "conversion_ratio": value, "exchange_ratio": value}
+                            for name, value in specifications]}
+        with patch("companion.desktop._read_local_report", return_value={}), \
+             patch("companion.desktop.replay_evidence.load", return_value={}), \
+             patch("companion.desktop._local_analysis", return_value=({"players": [player]}, "")):
+            app.show_match_details({"path": "unused", "linked": True})
+        def descendants(widget):
+            for child in widget.winfo_children():
+                yield child
+                yield from descendants(child)
+        _player_table, model_table = [widget for widget in descendants(self.root)
+                                     if isinstance(widget, self.ttk.Treeview) and widget is not app.tree]
+        self.assertEqual(model_table.set("2", "conversion"), "+∞")
+        self.assertEqual(model_table.set("0", "exchange"), "0.00")
+        self.assertEqual(model_table.set("3", "exchange"), "—")
+        model_table.selection_set("1")
+        for column in ("conversion", "exchange"):
+            self.click(model_table, column)
+            self.assertEqual([model_table.set(item, "model") for item in model_table.get_children()],
+                             ["Infinite A", "Infinite B", "Finite", "Zero", "Undefined"])
+            self.assertEqual(model_table.selection(), ("1",))
+            self.click(model_table, column)
+            self.assertEqual([model_table.set(item, "model") for item in model_table.get_children()],
+                             ["Zero", "Finite", "Infinite A", "Infinite B", "Undefined"])
+            self.assertEqual(model_table.selection(), ("1",))
+
+    def test_diagnostics_retains_counters_without_configuration_implementation_paragraph(self):
+        app = self.app()
+        variables = ("status_var", "session_var", "hash_var", "counts_var", "quality_var", "catalog_var", "code_var")
+        for name in variables:
+            setattr(app, name, self.tk.StringVar(value=name))
+        for language in ("en", "zh"):
+            app.language = language
+            app.show_diagnostics()
+            window = app.diagnostics_window
+            labels = [child for frame in window.winfo_children() for child in frame.winfo_children()
+                      if isinstance(child, self.ttk.Label)]
+            self.assertEqual(len(labels), len(variables))
+            self.assertEqual({str(label.cget("textvariable")) for label in labels},
+                             {str(getattr(app, name)) for name in variables})
+            text = " ".join(str(label.cget("text")) for label in labels)
+            self.assertNotIn("base64", text)
+            self.assertNotIn("environment", text)
+            self.assertNotIn("环境变量", text)
+            window.destroy()
 
 
 class DesktopMapLabelTests(unittest.TestCase):
